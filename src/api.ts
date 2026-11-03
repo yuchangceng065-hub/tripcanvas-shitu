@@ -41,7 +41,7 @@ export async function api(path:string,method='GET',body?:unknown,signal?:AbortSi
  const headers:Record<string,string>={'Content-Type':'application/json'}
  if(token)headers.Authorization='Bearer '+token
  let r:Response
- try{r=await fetch(base+path,{method,credentials:'include',headers,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(60000)]):AbortSignal.timeout(60000),body:body===undefined?undefined:JSON.stringify(body)})}
+ try{r=await fetch(base+path,{method,credentials:'include',headers,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(path==='/planner/draft'?150000:90000)]):AbortSignal.timeout(path==='/planner/draft'?150000:90000),body:body===undefined?undefined:JSON.stringify(body)})}
  catch(e){if(signal?.aborted)throw e;lastChecked=0;connection.status='offline';apiAvailable=false;throw new Error(method==='GET'?'网络连接失败，请重试':'未能确认云端操作结果，请重新连接后检查；本地行程仍保留。')}
  let d:any;try{d=await r.json()}catch{lastChecked=0;connection.status='offline';apiAvailable=false;throw new Error('云端服务暂不可用，请重新连接后重试')}
  if(!r.ok){if(r.status===401)setToken('');if(r.status>=500){lastChecked=0;connection.status='offline';apiAvailable=false}throw new Error(typeof d.detail==='string'?d.detail:'请求未能完成')}

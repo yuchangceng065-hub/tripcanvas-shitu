@@ -74,3 +74,51 @@ def test_render_rejects_ephemeral_sqlite():
     import subprocess,sys
     result=subprocess.run([sys.executable,'-c','import backend.app'],env={**os.environ,'RENDER':'true','DATABASE_URL':'sqlite:///:memory:'},capture_output=True,text=True)
     assert result.returncode!=0 and 'refusing ephemeral SQLite' in result.stderr
+
+def draft_body():
+    return {'title':'确认候选的新旅行','requirements':{'city':'杭州','startDate':'2026-11-14','days':1,'people':2,'mode':'walk','start':570,'end':1110,'pace':'balanced','interests':['博物馆']},'candidateIds':['museum','quyuan'],'useModel':False}
+
+def test_draft_preview_does_not_save_and_refuses_invented_places(client,monkeypatch):
+    register(client)
+    async def roads(body):return {'source':'osrm','legs':[{'minutes':10,'distance':.6} for _ in body.placeIds[1:]]}
+    monkeypatch.setattr(app.state.router,'route',roads)
+    result=client.post('/api/v1/planner/draft',json=draft_body())
+    assert result.status_code==200,result.text
+    data=result.json();assert data['source']=='heuristic' and not data['issues']
+    assert set(a['placeId'] for d in data['trip']['days'] for a in d['activities'])=={'museum','quyuan'}
+    assert client.get('/api/v1/trips/'+data['trip']['id']).status_code==404
+    assert client.put('/api/v1/trips/'+data['trip']['id'],json={'trip':data['trip']}).status_code==200
+    bad=draft_body();bad['candidateIds']=['invented'];assert client.post('/api/v1/planner/draft',json=bad).status_code==422
+
+def test_dynamic_place_is_authoritative_persistent_and_shared(client,monkeypatch):
+    from backend.catalog import normalize
+    from backend.app import POIS,PlaceRecord,SessionLocal
+    register(client)
+    place=normalize({'properties':{'name':'测试真实地点','osm_type':'N','osm_id':987654321,'city':'杭州市','street':'测试路'},'geometry':{'type':'Point','coordinates':[120.14,30.25]}})
+    async def search(q):return [place]
+    monkeypatch.setattr(app.state.search,'search',search)
+    result=client.get('/api/v1/places/search?q=真实地点');assert result.status_code==200
+    assert result.json()['places'][0]['address']=='杭州市 · 测试路'
+    with SessionLocal() as db:assert db.get(PlaceRecord,place['id']) is not None
+    t=trip();t['days'][0]['activities'][0]['placeId']=place['id'];t['placeSnapshots']=[{**place,'lng':1}]
+    assert client.put('/api/v1/trips/'+t['id'],json={'trip':t}).status_code==200
+    saved=client.get('/api/v1/trips/'+t['id']).json();assert saved['placeSnapshots'][0]['lng']==120.14
+    share=client.post('/api/v1/trips/'+t['id']+'/shares').json()
+    assert client.get('/api/v1/public/shares/'+share['token']).json()['placeSnapshots'][0]['id']==place['id']
+
+def test_model_cannot_invent_candidates(client,monkeypatch):
+    import backend.app as module
+    register(client)
+    async def hallucinate(system,data):return {'days':[['invented']]}
+    monkeypatch.setattr(module,'model_json',hallucinate)
+    body=draft_body();body['useModel']=True
+    assert client.post('/api/v1/planner/draft',json=body).status_code==422
+
+def test_return_deadline_conflict_and_requirements_lock(client,monkeypatch):
+    register(client)
+    async def slow(body):return {'source':'osrm','legs':[{'minutes':500,'distance':30} for _ in body.placeIds[1:]]}
+    monkeypatch.setattr(app.state.router,'route',slow)
+    body=draft_body();body['requirements'].update(destinationPlaceId='station',returnBy=1020)
+    data=client.post('/api/v1/planner/draft',json=body).json();assert data['issues']
+    before=Trip.model_validate(data['trip']);after=before.model_copy(deep=True);after.requirements.pace='full'
+    with pytest.raises(ValueError,match='需求'):verify_proposal(before,after,0)
