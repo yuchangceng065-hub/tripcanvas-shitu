@@ -1,0 +1,23 @@
+{
+  "name": "tripcanvas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vue-tsc -b && vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "vue": "^3.5.0",
+    "pinia": "^3.0.0",
+    "@lucide/vue": "^1.67.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "vite": "^7.0.0",
+    "typescript": "^5.9.0",
+    "vue-tsc": "^3.0.0",
+    "vitest": "^5.1.0"
+  }
+}
