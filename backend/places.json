@@ -7,12 +7,14 @@
     "description": "沿着湖岸和小桥散步，把上午留给树影、微风与水面。",
     "duration": 90,
     "cost": 0,
-    "lng": 120.1368,
-    "lat": 30.252,
+    "lng": 120.126904,
+    "lat": 30.251607,
     "x": 230,
     "y": 190,
     "indoor": false,
-    "image": "lake"
+    "image": "lake",
+    "coordinateSource": "https://www.openstreetmap.org/node/1468743785",
+    "crs": "WGS84"
   },
   {
     "id": "museum",
@@ -22,12 +24,14 @@
     "description": "在孤山脚下留一段安静的看展时间。实际开放与预约情况请在出发前确认。",
     "duration": 90,
     "cost": 0,
-    "lng": 120.1435,
-    "lat": 30.2528,
+    "lng": 120.1387829,
+    "lat": 30.2535309,
     "x": 410,
     "y": 190,
     "indoor": true,
-    "image": "museum"
+    "image": "museum",
+    "coordinateSource": "https://www.openstreetmap.org/node/775020312",
+    "crs": "WGS84"
   },
   {
     "id": "louwailou",
@@ -37,12 +41,14 @@
     "description": "把午间留给一顿从容的杭帮菜。餐费为个人预算，非实时菜单价格。",
     "duration": 75,
     "cost": 120,
-    "lng": 120.1416,
-    "lat": 30.2512,
+    "lng": 120.1360682,
+    "lat": 30.2526548,
     "x": 362,
     "y": 224,
     "indoor": true,
-    "image": "food"
+    "image": "food",
+    "coordinateSource": "https://www.openstreetmap.org/node/3387263609",
+    "crs": "WGS84"
   },
   {
     "id": "baidi",
@@ -52,12 +58,14 @@
     "description": "从平湖秋月走向断桥，途中不妨找一张长椅坐一会儿。",
     "duration": 75,
     "cost": 0,
-    "lng": 120.1511,
-    "lat": 30.2571,
+    "lng": 120.1453418,
+    "lat": 30.2589556,
     "x": 510,
     "y": 153,
     "indoor": false,
-    "image": "lake"
+    "image": "lake",
+    "coordinateSource": "https://www.openstreetmap.org/way/28538286",
+    "crs": "WGS84"
   },
   {
     "id": "hubin",
@@ -67,12 +75,14 @@
     "description": "沿着东岸慢慢走，在城市和湖水之间收集傍晚的颜色。",
     "duration": 60,
     "cost": 40,
-    "lng": 120.1612,
-    "lat": 30.2536,
+    "lng": 120.1579958,
+    "lat": 30.2560157,
     "x": 651,
     "y": 277,
     "indoor": false,
-    "image": "city"
+    "image": "city",
+    "coordinateSource": "https://www.openstreetmap.org/relation/13161114",
+    "crs": "WGS84"
   },
   {
     "id": "liulang",
@@ -82,12 +92,14 @@
     "description": "沿湖绿地与垂柳小径，适合留出一段不赶时间的散步。",
     "duration": 80,
     "cost": 0,
-    "lng": 120.1561,
-    "lat": 30.2333,
+    "lng": 120.151076,
+    "lat": 30.2419031,
     "x": 610,
     "y": 544,
     "indoor": false,
-    "image": "forest"
+    "image": "forest",
+    "coordinateSource": "https://www.openstreetmap.org/node/1468743758",
+    "crs": "WGS84"
   },
   {
     "id": "leifeng",
@@ -97,12 +109,14 @@
     "description": "走近西湖南岸的文化地标。票价和开放信息需在出发前核实。",
     "duration": 90,
     "cost": 40,
-    "lng": 120.1496,
-    "lat": 30.2301,
+    "lng": 120.145013,
+    "lat": 30.2338841,
     "x": 478,
     "y": 590,
     "indoor": false,
-    "image": "museum"
+    "image": "museum",
+    "coordinateSource": "https://www.openstreetmap.org/way/229726934",
+    "crs": "WGS84"
   },
   {
     "id": "silk",
@@ -112,12 +126,14 @@
     "description": "从织物与纹样开始，了解丝绸的历史。请自行确认预约和开放安排。",
     "duration": 100,
     "cost": 0,
-    "lng": 120.1485,
-    "lat": 30.2209,
+    "lng": 120.1465893,
+    "lat": 30.2251936,
     "x": 450,
     "y": 675,
     "indoor": true,
-    "image": "museum"
+    "image": "museum",
+    "coordinateSource": "https://www.openstreetmap.org/relation/8281187",
+    "crs": "WGS84"
   },
   {
     "id": "art",
@@ -127,27 +143,31 @@
     "description": "在西湖南岸看展，给旅行留一点安静的时间。展览信息以官方为准。",
     "duration": 90,
     "cost": 0,
-    "lng": 120.1546,
-    "lat": 30.2306,
+    "lng": 120.1522705,
+    "lat": 30.2334023,
     "x": 570,
     "y": 600,
     "indoor": true,
-    "image": "art"
+    "image": "art",
+    "coordinateSource": "https://www.openstreetmap.org/way/420546406",
+    "crs": "WGS84"
   },
   {
     "id": "coffee",
-    "name": "湖畔咖啡时光",
+    "name": "湖滨休息点",
     "kind": "休息",
-    "tag": "自选咖啡店",
-    "description": "这是可编辑的示例休息点，请在出发前选定实际咖啡店。",
+    "tag": "自由休息",
+    "description": "湖滨步行街附近的自由休息安排，具体座位由你现场选择，不代表咖啡店。",
     "duration": 60,
-    "cost": 45,
-    "lng": 120.1598,
-    "lat": 30.2528,
+    "cost": 0,
+    "lng": 120.1579958,
+    "lat": 30.2560157,
     "x": 640,
     "y": 314,
-    "indoor": true,
-    "image": "coffee"
+    "indoor": false,
+    "image": "coffee",
+    "coordinateSource": "https://www.openstreetmap.org/relation/13161114",
+    "crs": "WGS84"
   },
   {
     "id": "sudi",
@@ -157,12 +177,14 @@
     "description": "沿着长堤漫步，适当留出休息时间。",
     "duration": 110,
     "cost": 0,
-    "lng": 120.1369,
-    "lat": 30.2403,
+    "lng": 120.1340722,
+    "lat": 30.2439178,
     "x": 264,
     "y": 408,
     "indoor": false,
-    "image": "forest"
+    "image": "forest",
+    "coordinateSource": "https://www.openstreetmap.org/way/30072131",
+    "crs": "WGS84"
   },
   {
     "id": "station",
@@ -172,11 +194,13 @@
     "description": "这是行程的到站时间约束，不包含购票。请为进站安检另留余量。",
     "duration": 30,
     "cost": 0,
-    "lng": 120.2128,
-    "lat": 30.2909,
+    "lng": 120.2082034,
+    "lat": 30.2935486,
     "x": 795,
     "y": 90,
     "indoor": true,
-    "image": "city"
+    "image": "city",
+    "coordinateSource": "https://www.openstreetmap.org/node/7160108921",
+    "crs": "WGS84"
   }
 ]

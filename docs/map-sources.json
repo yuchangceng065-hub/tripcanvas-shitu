@@ -1,0 +1,106 @@
+{
+  "retrievedAt": "2026-11-03",
+  "crs": "WGS84",
+  "license": "ODbL 1.0; © OpenStreetMap contributors",
+  "copyright": "https://www.openstreetmap.org/copyright",
+  "provider": "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  "notes": "一次性查询公开地点并缓存。区域取代表点，并非核实过的入口或停车场；路线吸附点另行显示。",
+  "places": [
+    {
+      "id": "quyuan",
+      "name": "曲院风荷",
+      "lng": 120.126904,
+      "lat": 30.251607,
+      "source": "https://www.openstreetmap.org/node/1468743785",
+      "coordinateKind": "OSM node"
+    },
+    {
+      "id": "museum",
+      "name": "浙江省博物馆 · 孤山馆区",
+      "lng": 120.1387829,
+      "lat": 30.2535309,
+      "source": "https://www.openstreetmap.org/node/775020312",
+      "coordinateKind": "OSM node"
+    },
+    {
+      "id": "louwailou",
+      "name": "楼外楼 · 孤山路店",
+      "lng": 120.1360682,
+      "lat": 30.2526548,
+      "source": "https://www.openstreetmap.org/node/3387263609",
+      "coordinateKind": "OSM node"
+    },
+    {
+      "id": "baidi",
+      "name": "白堤",
+      "lng": 120.1453418,
+      "lat": 30.2589556,
+      "source": "https://www.openstreetmap.org/way/28538286",
+      "coordinateKind": "OSM bounding box center"
+    },
+    {
+      "id": "hubin",
+      "name": "湖滨步行街",
+      "lng": 120.1579958,
+      "lat": 30.2560157,
+      "source": "https://www.openstreetmap.org/relation/13161114",
+      "coordinateKind": "OSM bounding box center"
+    },
+    {
+      "id": "liulang",
+      "name": "柳浪闻莺",
+      "lng": 120.151076,
+      "lat": 30.2419031,
+      "source": "https://www.openstreetmap.org/node/1468743758",
+      "coordinateKind": "OSM node"
+    },
+    {
+      "id": "leifeng",
+      "name": "雷峰塔",
+      "lng": 120.145013,
+      "lat": 30.2338841,
+      "source": "https://www.openstreetmap.org/way/229726934",
+      "coordinateKind": "OSM bounding box center"
+    },
+    {
+      "id": "silk",
+      "name": "中国丝绸博物馆",
+      "lng": 120.1465893,
+      "lat": 30.2251936,
+      "source": "https://www.openstreetmap.org/relation/8281187",
+      "coordinateKind": "OSM bounding box center"
+    },
+    {
+      "id": "art",
+      "name": "浙江美术馆",
+      "lng": 120.1522705,
+      "lat": 30.2334023,
+      "source": "https://www.openstreetmap.org/way/420546406",
+      "coordinateKind": "OSM bounding box center"
+    },
+    {
+      "id": "coffee",
+      "name": "湖滨休息点",
+      "lng": 120.1579958,
+      "lat": 30.2560157,
+      "source": "https://www.openstreetmap.org/relation/13161114",
+      "coordinateKind": "OSM bounding box center"
+    },
+    {
+      "id": "sudi",
+      "name": "苏堤",
+      "lng": 120.1340722,
+      "lat": 30.2439178,
+      "source": "https://www.openstreetmap.org/way/30072131",
+      "coordinateKind": "OSM bounding box center"
+    },
+    {
+      "id": "station",
+      "name": "杭州东站",
+      "lng": 120.2082034,
+      "lat": 30.2935486,
+      "source": "https://www.openstreetmap.org/node/7160108921",
+      "coordinateKind": "OSM node"
+    }
+  ]
+}

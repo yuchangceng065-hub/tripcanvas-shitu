@@ -12,12 +12,17 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import create_engine, String, Text, Integer, Float, select, delete, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
+from backend.routing import Router, RouteBody
 
 ROOT=Path(__file__).parent
 PLACES=json.loads((ROOT/'places.json').read_text())
 POIS={p['id']:p for p in PLACES}
 DATABASE_URL=os.getenv('DATABASE_URL',f'sqlite:///{ROOT / "tripcanvas.db"}')
-engine=create_engine(DATABASE_URL,connect_args={'check_same_thread':False} if DATABASE_URL.startswith('sqlite') else {})
+if DATABASE_URL.startswith(('postgres://','postgresql://')):
+    DATABASE_URL='postgresql+psycopg://'+DATABASE_URL.split('://',1)[1]
+if os.getenv('RAILWAY_ENVIRONMENT_ID') and not os.getenv('DATABASE_URL'):
+    raise RuntimeError('Railway requires a persistent DATABASE_URL; refusing ephemeral SQLite')
+engine=create_engine(DATABASE_URL,pool_pre_ping=True,connect_args={'check_same_thread':False} if DATABASE_URL.startswith('sqlite') else {})
 SessionLocal=sessionmaker(engine,expire_on_commit=False)
 class Base(DeclarativeBase): pass
 class User(Base):
@@ -64,10 +69,12 @@ class Run(Base):
 @asynccontextmanager
 async def lifespan(app):
     Base.metadata.create_all(engine)
-    yield
+    async with httpx.AsyncClient(timeout=20,headers={'User-Agent':'TripCanvas/1.1 (+https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site)'}) as client:
+        app.state.router=Router(client,POIS)
+        yield
 app=FastAPI(title='拾途 TripCanvas API',version='1.0.0',lifespan=lifespan)
 ORIGINS=os.getenv('FRONTEND_ORIGINS','http://127.0.0.1:5173,http://localhost:5173').split(',')
-app.add_middleware(CORSMiddleware,allow_origins=ORIGINS,allow_credentials=True,allow_methods=['GET','POST','PUT','PATCH','DELETE'],allow_headers=['Content-Type','Idempotency-Key'])
+app.add_middleware(CORSMiddleware,allow_origins=ORIGINS,allow_credentials=True,allow_methods=['GET','POST','PUT','PATCH','DELETE'],allow_headers=['Content-Type','Idempotency-Key','Authorization'])
 @app.middleware('http')
 async def origin_check(request,call_next):
     if request.method not in ('GET','HEAD','OPTIONS'):
@@ -80,8 +87,12 @@ async def origin_check(request,call_next):
 def db():
     with SessionLocal() as s: yield s
 
+def session_token(request:Request):
+    authorization=request.headers.get('authorization','')
+    return authorization[7:] if authorization.startswith('Bearer ') else request.cookies.get('tripcanvas_session','')
+
 def current_user(request:Request,s:Session=Depends(db)):
-    token=request.cookies.get('tripcanvas_session','')
+    token=session_token(request)
     record=s.get(AuthSession,hashlib.sha256(token.encode()).hexdigest())
     if not record or record.expires<time.time(): raise HTTPException(401,'请先登录')
     user=s.get(User,record.owner)
@@ -143,12 +154,12 @@ def travel(a,b,mode):
     h=math.sin((b['lat']-a['lat'])*rad/2)**2+math.cos(a['lat']*rad)*math.cos(b['lat']*rad)*math.sin((b['lng']-a['lng'])*rad/2)**2
     distance=6371*2*math.asin(math.sqrt(h))*1.25
     return max(5,math.floor(distance/(4.5 if mode=='walk' else 23)*60+(8 if mode=='drive' else 0)+.5))
-def issues(t:Trip):
+def issues(t:Trip,routes=None):
     result=[]
     for i,d in enumerate(t.days):
         end=d.start
         for j,a in enumerate(d.activities):
-            minutes=travel(POIS[d.activities[j-1].placeId],POIS[a.placeId],t.mode) if j else 0
+            minutes=(routes[i]['legs'][j-1]['minutes'] if routes and i in routes else travel(POIS[d.activities[j-1].placeId],POIS[a.placeId],t.mode)) if j else 0
             earliest=end+minutes
             start=a.fixedStart if a.lock=='fixed' else earliest
             end=start+a.duration
@@ -184,23 +195,32 @@ def login_cookie(response,user,s):
     token=secrets.token_urlsafe(32)
     s.add(AuthSession(token=hashlib.sha256(token.encode()).hexdigest(),owner=user.id,expires=time.time()+86400*7));s.commit()
     response.set_cookie('tripcanvas_session',token,httponly=True,secure=os.getenv('COOKIE_SECURE')=='1',samesite='lax',max_age=86400*7)
+    response.headers['Cache-Control']='no-store'
+    return {'username':user.username,'access_token':token,'token_type':'bearer'}
 
 @app.get('/api/v1/health')
-def health():return {'status':'ok','model':bool(os.getenv('MODEL_API_KEY')),'map':bool(os.getenv('AMAP_WEB_KEY')),'storage':'postgresql' if DATABASE_URL.startswith('postgres') else 'sqlite'}
+def health(s:Session=Depends(db)):
+    s.execute(select(1))
+    return {'status':'ok','model':all(os.getenv(k) for k in ('MODEL_API_KEY','MODEL_BASE_URL','MODEL_NAME')),'map':'osm','routing':'osrm','storage':'postgresql' if DATABASE_URL.startswith('postgres') else 'sqlite'}
+
+@app.post('/api/v1/routes')
+async def roads(data:RouteBody,request:Request):
+    throttle('route:'+request.client.host,30)
+    return await request.app.state.router.route(data)
 @app.post('/api/v1/auth/register')
 def register(data:Credentials,response:Response,request:Request,s:Session=Depends(db)):
     throttle('auth:'+request.client.host,8)
     if s.scalar(select(User).where(User.username==data.username)):raise HTTPException(409,'用户名已存在')
-    user=User(id=str(uuid.uuid4()),username=data.username,password=password_hash(data.password));s.add(user);s.commit();login_cookie(response,user,s);return {'username':user.username}
+    user=User(id=str(uuid.uuid4()),username=data.username,password=password_hash(data.password));s.add(user);s.commit();return login_cookie(response,user,s)
 @app.post('/api/v1/auth/login')
 def login(data:Credentials,response:Response,request:Request,s:Session=Depends(db)):
     throttle('auth:'+request.client.host,8)
     user=s.scalar(select(User).where(User.username==data.username))
     if not user or not hmac.compare_digest(password_hash(data.password,user.password.split(':')[0]),user.password):raise HTTPException(401,'用户名或密码不正确')
-    login_cookie(response,user,s);return {'username':user.username}
+    return login_cookie(response,user,s)
 @app.post('/api/v1/auth/logout')
 def logout(request:Request,response:Response,s:Session=Depends(db)):
-    token=request.cookies.get('tripcanvas_session','');s.execute(delete(AuthSession).where(AuthSession.token==hashlib.sha256(token.encode()).hexdigest()));s.commit();response.delete_cookie('tripcanvas_session');return {'ok':True}
+    token=session_token(request);s.execute(delete(AuthSession).where(AuthSession.token==hashlib.sha256(token.encode()).hexdigest()));s.commit();response.delete_cookie('tripcanvas_session');return {'ok':True}
 @app.get('/api/v1/auth/me')
 def me(user:User=Depends(current_user)):return {'username':user.username}
 @app.get('/api/v1/trips')
@@ -235,9 +255,14 @@ def delete_trip(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
 def versions(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
     owned(s,id,user);return [{'id':v.id,'revision':v.revision,'trip':json.loads(v.snapshot)} for v in s.scalars(select(VersionRow).where(VersionRow.trip_id==id).order_by(VersionRow.created.desc()))]
 @app.post('/api/v1/trips/{id}/validate')
-def check_plan(id:str,data:TripBody,user:User=Depends(current_user)):
+async def check_plan(id:str,data:TripBody,request:Request,user:User=Depends(current_user)):
     if id!=data.trip.id:raise HTTPException(422,'旅行 ID 不一致')
-    return {'issues':issues(data.trip),'route_source':'approximate','opening_hours':'unknown'}
+    throttle('validate:'+user.id,15)
+    routes={}
+    for i,day in enumerate(data.trip.days):
+        if len(day.activities)>1:
+            routes[i]=await request.app.state.router.route(RouteBody(mode=data.trip.mode,placeIds=[a.placeId for a in day.activities]))
+    return {'issues':issues(data.trip,routes),'route_source':'osrm','opening_hours':'unknown'}
 @app.post('/api/v1/trips/{id}/shares')
 def share(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
     t=owned(s,id,user);token=secrets.token_urlsafe(24);share_id=str(uuid.uuid4())

@@ -1,0 +1,10 @@
+.git
+.env*
+.venv
+node_modules
+dist
+.openai
+**/__pycache__
+**/*.db*
+**/.pytest_cache
+backend/tests

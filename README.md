@@ -5,7 +5,7 @@
 ## 当前实现
 
 - 桌面三栏旅行画布、手机端行程 / 地图 / 助手切换。
-- 可缩放、拖动、选择地点的原创 SVG 西湖路线示意图。
+- Leaflet + OpenStreetMap 真实地图，OSRM 步行 / 驾车道路轨迹、里程与用时。
 - 日程切换、拖拽排序、按钮排序、跨日移动、时长编辑、地点增删与收藏。
 - 必须保留 / 固定时间 / 解锁，时间冲突检测，固定返程检查。
 - 明确标注的规则建议（轻松一点、室内替换、晚出发），修改预览后确认。
@@ -17,7 +17,9 @@
 
 当前托管版本是静态前端，数据保存在当前浏览器。Sites 不执行 Python，FastAPI 需单独运行或部署；注册、云端同步和可撤销链接仅在连接后端时工作。
 
-地图为明确标注的区域示意图，路线时间按坐标近似估算，不能用于导航。默认未连接实时地图和模型。`AMAP_WEB_KEY` 可启用后端真实地点搜索适配器；前端目前仍使用固定示例地点与示意图，完整高德地图 SDK、实时路线联动及多城市规划属于后续集成。未取得实际密钥，外部服务没有进行真实调用验证。
+地图与路线已完成真实调用验证，地点使用 OSM WGS84 坐标，来源见 docs/map-sources.json。路线失败时明确显示错误和估算标签。道路用时不包含实时交通、停车与景区步行衔接。地点选择仍限于杭州目录，尚未实现任意城市搜索。模型未配置。
+
+当前 owner-private 前端在 Python 未连接时直接访问 FOSSGIS 路线服务，串行限速并缓存 24 小时。配置 VITE_API_BASE 后统一通过 Python 路线代理，不再自动退回直连。公开多用户使用前必须接通后端，并选择满足容量的路线服务。
 
 生成建议是“请求完成后返回结构化结果”；SSE 接口可读取已完成运行事件，尚未实现逐阶段后台持久任务。当前数据库使用 SQLAlchemy 自动创建初始表；后续变更应加入 Alembic 迁移。Docker/PostgreSQL 配置已提供，但本次自动化验证使用 SQLite。
 
@@ -69,7 +71,7 @@ npm run build
 ## 目录
 
 - `src/App.vue`：三个主要页面与交互。
-- `src/components/TripMap.vue`：示意地图与路线标记。
+- `src/components/TripMap.vue`：Leaflet 地图、真实道路轨迹与路线标记。
 - `src/domain.ts`：行程、锁定、计算与规则建议。
 - `src/store.ts`：本地持久化和版本管理。
 - `src/api.ts`：后端适配。
@@ -79,7 +81,7 @@ npm run build
 
 ## 图片与图形
 
-地图、Logo 和助手插画为本项目原创 SVG/CSS。氛围照片来自 Unsplash 图片服务：
+地图 © OpenStreetMap contributors（ODbL）；路线由 FOSSGIS / OSRM 提供。Logo 和助手插画为本项目原创 SVG/CSS。氛围照片来自 Unsplash 图片服务：
 
 - https://images.unsplash.com/photo-1470770841072-f978cf4d019e
 - https://images.unsplash.com/photo-1509042239860-f550ce710b93
@@ -87,3 +89,7 @@ npm run build
 - https://images.unsplash.com/photo-1511818966892-d7d671e672a2
 
 图标来自 Lucide（ISC）。界面已标注示例数据与氛围图片性质。
+
+## Railway 部署
+
+部署配置和步骤见 `docs/railway-deployment.md`。当前尚未取得 Railway 服务地址；配置文件不代表后端已上线。

@@ -52,3 +52,20 @@ def test_conflict_and_invalid_place():
 def test_csrf_and_no_model(client):
     assert client.post('/api/v1/auth/login',headers={'origin':'https://untrusted.invalid'},json={'username':'abc','password':'12345678'}).status_code==403
     register(client);assert client.post('/api/v1/planner/suggest',json={'trip':trip(),'day':0,'prompt':'轻松一点'}).status_code==503
+
+def test_bearer_session_survives_without_third_party_cookies_and_revokes(client):
+    response=client.post('/api/v1/auth/register',json={'username':'bearer_'+uuid.uuid4().hex[:8],'password':'test-password-123'})
+    assert response.headers['cache-control']=='no-store'
+    token=response.json()['access_token'];client.cookies.clear()
+    assert client.get('/api/v1/auth/me').status_code==401
+    headers={'Authorization':'Bearer '+token}
+    assert client.get('/api/v1/auth/me',headers=headers).status_code==200
+    assert client.post('/api/v1/auth/logout',headers=headers).status_code==200
+    assert client.get('/api/v1/auth/me',headers=headers).status_code==401
+
+def test_route_schema_and_cors(client):
+    assert client.post('/api/v1/routes',json={'mode':'walk','placeIds':['invented','quyuan']}).status_code==422
+    assert client.post('/api/v1/routes',json={'mode':'flight','placeIds':['museum','quyuan']}).status_code==422
+    response=client.options('/api/v1/routes',headers={'Origin':'http://127.0.0.1:5173','Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'Authorization,Content-Type'})
+    assert response.status_code==200
+    assert response.headers['access-control-allow-origin']=='http://127.0.0.1:5173'
