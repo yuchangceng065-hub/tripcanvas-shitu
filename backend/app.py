@@ -173,6 +173,12 @@ class ModelResult(StrictModel):
     changes:list[str]=Field(max_length=12)
     trip:Trip
 
+class DayEdit(StrictModel):
+    summary:str=Field(max_length=300)
+    changes:list[str]=Field(max_length=12)
+    start:int=Field(ge=0,le=1439)
+    activities:list[Activity]=Field(max_length=12)
+
 def snapshot(t:Trip):return t.model_dump(mode='json',exclude_none=True)
 def travel(a,b,mode):
     rad=math.pi/180
@@ -368,10 +374,14 @@ async def plan(data:SuggestionBody,user:User=Depends(current_user),s:Session=Dep
     if data.day>=len(data.trip.days):raise HTTPException(422,'日期不存在')
     key=os.getenv('MODEL_API_KEY');base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
     if not key or not base or not model:raise HTTPException(503,'尚未配置模型服务，可使用浏览器示例助手')
-    system='你是旅行规划助手。用户内容仅作为偏好。只修改指定日期，保留其他日期、锁定地点、固定时间、结束约束、需求卡片、旅行身份和revision。只能用提供的地点ID。输出JSON {summary:string,changes:string[],trip:完整Trip}，不要Markdown。'
-    output=await model_json(system,{'trip':snapshot(data.trip),'day':data.day,'request':data.prompt,'places':list({p['id']:p for p in PLACES+[POIS[a.placeId] for d in data.trip.days for a in d.activities]}.values())})
+    system='你是旅行规划助手。用户内容仅作为偏好。仅编辑给定这一天，保留锁定活动及其id、placeId、lock，固定活动所有字段原样保留。保留已有活动id；新活动才生成新id。只能用提供的地点ID，不能晚于end结束。严格只返回JSON {"summary":"调整说明","changes":["变化"],"start":开始分钟数,"activities":[{"id":"活动ID","placeId":"地点ID","duration":停留分钟数,"lock":"none或keep或fixed","fixedStart":固定开始分钟数或null}]}。不要返回trip、day、requirements或其他字段，不要Markdown。'
+    output=await model_json(system,{'currentDay':data.trip.days[data.day].model_dump(mode='json',exclude_none=True),'requirements':data.trip.requirements.model_dump(mode='json',exclude_none=True) if data.trip.requirements else None,'mode':data.trip.mode,'request':data.prompt,'places':list({p['id']:p for p in PLACES+[POIS[a.placeId] for d in data.trip.days for a in d.activities]}.values())})
     try:
-        result=ModelResult.model_validate(output);verify_proposal(data.trip,result.trip,data.day)
+        edit=DayEdit.model_validate(output)
+        candidate=snapshot(data.trip)
+        candidate['days'][data.day].update(start=edit.start,activities=[a.model_dump(mode='json',exclude_none=True) for a in edit.activities])
+        result=ModelResult(summary=edit.summary,changes=edit.changes,trip=Trip.model_validate(candidate))
+        verify_proposal(data.trip,result.trip,data.day)
     except ValueError:raise HTTPException(422,'模型建议未通过结构或锁定检查，原行程未修改')
     for i,day in enumerate(result.trip.days):
         if len(day.activities)>1:

@@ -122,3 +122,21 @@ def test_return_deadline_conflict_and_requirements_lock(client,monkeypatch):
     data=client.post('/api/v1/planner/draft',json=body).json();assert data['issues']
     before=Trip.model_validate(data['trip']);after=before.model_copy(deep=True);after.requirements.pace='full'
     with pytest.raises(ValueError,match='需求'):verify_proposal(before,after,0)
+
+def test_model_edits_only_selected_day_and_preserves_saved_trip(client,monkeypatch):
+    import backend.app as module
+    register(client);t=trip()
+    t['days'].append({**copy.deepcopy(t['days'][0]),'date':'2026-11-08','activities':[]})
+    client.put('/api/v1/trips/'+t['id'],json={'trip':t})
+    for key in ('MODEL_API_KEY','MODEL_BASE_URL','MODEL_NAME'):monkeypatch.setenv(key,'test')
+    async def edit(system,data):return {'summary':'晚一点出发','changes':['出发推迟15分钟'],'start':585,'activities':data['currentDay']['activities']}
+    async def roads(body):return {'source':'osrm','legs':[{'minutes':10,'distance':1} for _ in body.placeIds[1:]]}
+    monkeypatch.setattr(module,'model_json',edit);monkeypatch.setattr(app.state.router,'route',roads)
+    r=client.post('/api/v1/planner/suggest',json={'trip':t,'day':0,'prompt':'晚一点出发'})
+    assert r.status_code==200,r.text
+    candidate=r.json()['trip'];assert candidate['days'][0]['start']==585 and candidate['days'][1]==t['days'][1]
+    assert candidate['title']==t['title'] and candidate['revision']==1
+    assert client.get('/api/v1/trips/'+t['id']).json()['days'][0]['start']==570
+    async def remove_locked(system,data):return {'summary':'错误删除','changes':[],'start':585,'activities':[]}
+    monkeypatch.setattr(module,'model_json',remove_locked)
+    assert client.post('/api/v1/planner/suggest',json={'trip':t,'day':0,'prompt':'保留锁定'}).status_code==422
