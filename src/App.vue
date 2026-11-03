@@ -23,6 +23,17 @@ const proposal=ref<Proposal|null>(null),prompt=ref(''),busy=ref(false),response=
 const proposalRoutes=ref<RouteMap>({}),proposalRouteError=ref('')
 const proposalIssues=computed(()=>proposal.value?validate(proposal.value.trip,proposalRoutes.value).filter(x=>x.severity==='error'):[])
 const builderKey=ref(0),resumeBuilder=ref(false)
+const promptComposing=ref(false)
+const assistantScroll=ref<HTMLElement|null>(null)
+watch([busy,response],async()=>{
+ await nextTick()
+ if(assistantScroll.value)assistantScroll.value.scrollTop=assistantScroll.value.scrollHeight
+})
+function onPromptKeydown(event:KeyboardEvent){
+ if(event.key!=='Enter'||event.shiftKey||event.isComposing||promptComposing.value||event.keyCode===229)return
+ event.preventDefault()
+ void generate()
+}
 function acceptDraft(t:Trip){registerPlaces(t.placeSnapshots);store.add(t);syncTrip(t);openTrip(t.id);modal.value='';builderKey.value++;notify('旅行草案已确认保存')}
 const deletingTrip=ref<string|null>(null)
 async function deleteTrip(){if(!deletingTrip.value)return;const id=deletingTrip.value;if(backend.value&&user.value){try{await api('/trips/'+id,'DELETE')}catch(e){notify((e as Error).message);return}}store.remove(id);modal.value='';deletingTrip.value=null;notify('旅行已删除')}
@@ -134,16 +145,16 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=
     </section>
     <aside class="assistant-panel" :class="{'mobile-show':tabMobile==='ai'}">
      <div class="assistant-header"><span class="spark-icon"><Sparkles :size="19"/></span><div><h2>你的旅行搭子</h2><p>一起，把旅程调整到刚刚好。</p></div><span class="ai-badge">{{hasModel&&user?'AI':'体验版'}}</span></div>
-     <div class="assistant-scroll">
+     <div ref="assistantScroll" class="assistant-scroll">
       <div class="assistant-intro"><span class="mini-eyebrow">HELLO, TRAVELER</span><h3>好旅行，<br>也需要一点留白。</h3><p>想晚点出发，还是多坐一会儿？<br>告诉我，我们一起调整。</p><div class="intro-art"><div class="sun-disc"/><div class="hill hill-back"/><div class="hill hill-front"/><div class="art-path"/><span class="tiny-tree">♧</span><div class="art-note">TAKE IT SLOW</div></div></div>
       <div class="suggestion-title">试试这样调整 <Sparkles :size="13"/></div>
       <div class="quick-prompts"><button @click="generate('今天轻松一点，减少一个地点')" :disabled="busy"><Leaf :size="16"/><span>今天想轻松一点</span><ArrowUpRight :size="14"/></button><button @click="generate('下雨了，改成室内活动')" :disabled="busy"><CloudRain :size="16"/><span>换成室内的好去处</span><ArrowUpRight :size="14"/></button><button @click="generate('晚出发一小时')" :disabled="busy"><Coffee :size="16"/><span>多睡一会，晚点出发</span><ArrowUpRight :size="14"/></button></div>
       <div class="protected-note"><LockKeyhole :size="14"/><p>你锁定的安排，会好好保留。<span>调整前可以预览，确认后再应用。</span></p></div>
-      <div v-if="busy" class="assistant-message"><LoaderCircle :size="17" class="spin"/>正在检查可调整的安排…</div>
-      <div v-if="response" class="assistant-message response"><Sparkles :size="16"/><p>{{response}}</p></div>
+      <div v-if="busy" class="assistant-message" role="status"><LoaderCircle :size="17" class="spin"/>正在检查可调整的安排…</div>
+      <div v-if="response" class="assistant-message response" role="status"><Sparkles :size="16"/><p>{{response}}</p></div>
       <div v-if="proposal" class="proposal-card"><div class="proposal-head"><span>调整预览</span><small>Day {{dayIndex+1}}</small></div><p v-for="(change,i) in proposal.changes" :key="i"><ArrowRight :size="14"/>{{change}}</p><div v-if="proposalIssues.length>0" class="proposal-error"><AlertTriangle :size="14"/>按道路用时检查，新方案有时间冲突，请调整出发或结束时间后重试。</div><p v-if="proposalRouteError" class="proposal-error">{{proposalRouteError}}，请重新生成。</p><button class="button primary" @click="applyProposal" :disabled="busy||proposalIssues.length>0||!!proposalRouteError"><Check :size="16"/>应用这个安排</button><button class="text-button" @click="proposal=null;response=''">保留原计划</button></div>
      </div>
-     <form class="composer" @submit.prevent="generate()"><textarea v-model="prompt" rows="2" placeholder="说说你想怎么调整今天…" aria-label="行程调整需求" :disabled="busy"/><div><span><Sparkles :size="12"/>仅调整 Day {{dayIndex+1}}</span><button type="submit" :disabled="busy||!prompt.trim()" aria-label="发送调整需求"><LoaderCircle v-if="busy" class="spin" :size="16"/><ArrowUp v-else :size="17"/></button></div></form>
+     <form class="composer" @submit.prevent="generate()"><textarea v-model="prompt" rows="2" placeholder="说说你想怎么调整今天…" aria-label="行程调整需求" aria-describedby="composer-help" :disabled="busy" @keydown="onPromptKeydown" @compositionstart="promptComposing=true" @compositionend="promptComposing=false"/><p id="composer-help" class="composer-help">Enter 发送 · Shift+Enter 换行</p><div><span><Sparkles :size="12"/>仅调整 Day {{dayIndex+1}}</span><button type="submit" :disabled="busy||!prompt.trim()" aria-label="发送调整需求"><LoaderCircle v-if="busy" class="spin" :size="16"/><ArrowUp v-else :size="17"/></button></div></form>
      <p class="assistant-disclaimer">{{hasModel&&user?'建议仍需结合实际情况确认':'示例助手使用规则建议，非实时模型回答'}}</p>
     </aside>
    </section>
