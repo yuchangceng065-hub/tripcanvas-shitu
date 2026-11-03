@@ -69,3 +69,8 @@ def test_route_schema_and_cors(client):
     response=client.options('/api/v1/routes',headers={'Origin':'http://127.0.0.1:5173','Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'Authorization,Content-Type'})
     assert response.status_code==200
     assert response.headers['access-control-allow-origin']=='http://127.0.0.1:5173'
+
+def test_render_rejects_ephemeral_sqlite():
+    import subprocess,sys
+    result=subprocess.run([sys.executable,'-c','import backend.app'],env={**os.environ,'RENDER':'true','DATABASE_URL':'sqlite:///:memory:'},capture_output=True,text=True)
+    assert result.returncode!=0 and 'refusing ephemeral SQLite' in result.stderr

@@ -90,6 +90,8 @@ npm run build
 
 图标来自 Lucide（ISC）。界面已标注示例数据与氛围图片性质。
 
-## Railway 部署
+## 免费云端部署
 
-部署配置和步骤见 `docs/railway-deployment.md`。当前尚未取得 Railway 服务地址；配置文件不代表后端已上线。
+采用 Render Free + Neon Free，配置在 `render.yaml`，步骤见 `docs/render-neon-deployment.md`。前端已加入有限时长的唤醒等待、状态提示和手动重连；失败的写请求不会自动重发。云端要求 PostgreSQL，不允许临时 SQLite。账号授权和实际服务创建完成后，才能填写线上 API 地址；当前配置文件不代表后端已经上线。
+
+此前 Railway 部署被新账号试用限制阻止，不再作为首选。

@@ -10,6 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy.exc import OperationalError
 from sqlalchemy import create_engine, String, Text, Integer, Float, select, delete, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 from backend.routing import Router, RouteBody
@@ -20,9 +21,9 @@ POIS={p['id']:p for p in PLACES}
 DATABASE_URL=os.getenv('DATABASE_URL',f'sqlite:///{ROOT / "tripcanvas.db"}')
 if DATABASE_URL.startswith(('postgres://','postgresql://')):
     DATABASE_URL='postgresql+psycopg://'+DATABASE_URL.split('://',1)[1]
-if os.getenv('RAILWAY_ENVIRONMENT_ID') and not os.getenv('DATABASE_URL'):
-    raise RuntimeError('Railway requires a persistent DATABASE_URL; refusing ephemeral SQLite')
-engine=create_engine(DATABASE_URL,pool_pre_ping=True,connect_args={'check_same_thread':False} if DATABASE_URL.startswith('sqlite') else {})
+if (os.getenv('RENDER') or os.getenv('RAILWAY_ENVIRONMENT_ID')) and (not os.getenv('DATABASE_URL') or DATABASE_URL.startswith('sqlite')):
+    raise RuntimeError('Cloud deployment requires a PostgreSQL DATABASE_URL; refusing ephemeral SQLite')
+engine=create_engine(DATABASE_URL,pool_pre_ping=True,**({'connect_args':{'check_same_thread':False}} if DATABASE_URL.startswith('sqlite') else {'pool_size':2,'max_overflow':2,'pool_recycle':300,'connect_args':{'connect_timeout':10,'application_name':'tripcanvas','prepare_threshold':None}}))
 SessionLocal=sessionmaker(engine,expire_on_commit=False)
 class Base(DeclarativeBase): pass
 class User(Base):
@@ -68,12 +69,20 @@ class Run(Base):
 
 @asynccontextmanager
 async def lifespan(app):
-    Base.metadata.create_all(engine)
+    for attempt in range(5):
+        try:
+            Base.metadata.create_all(engine)
+            break
+        except OperationalError:
+            if attempt==4:raise
+            await asyncio.sleep(min(2**attempt,8))
     async with httpx.AsyncClient(timeout=20,headers={'User-Agent':'TripCanvas/1.1 (+https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site)'}) as client:
         app.state.router=Router(client,POIS)
         yield
+    engine.dispose()
 app=FastAPI(title='拾途 TripCanvas API',version='1.0.0',lifespan=lifespan)
 ORIGINS=os.getenv('FRONTEND_ORIGINS','http://127.0.0.1:5173,http://localhost:5173').split(',')
+ORIGINS=[origin.strip().rstrip('/') for origin in ORIGINS if origin.strip()]
 app.add_middleware(CORSMiddleware,allow_origins=ORIGINS,allow_credentials=True,allow_methods=['GET','POST','PUT','PATCH','DELETE'],allow_headers=['Content-Type','Idempotency-Key','Authorization'])
 @app.middleware('http')
 async def origin_check(request,call_next):

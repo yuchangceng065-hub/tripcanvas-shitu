@@ -1,4 +1,4 @@
-"""Railway supplies PORT; single worker keeps public routing throttling shared."""
+"""Render/Railway supply PORT; single worker keeps public routing throttling shared."""
 import os
 import uvicorn
 
