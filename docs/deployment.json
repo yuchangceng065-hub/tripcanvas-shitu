@@ -1,0 +1,13 @@
+{
+  "frontend": "https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site",
+  "api": "https://tripcanvas-api.onrender.com",
+  "renderServiceId": "srv-dbl2b2t9fdbs73clvji0",
+  "renderPlan": "free",
+  "renderRegion": "oregon",
+  "repository": "https://github.com/yuchangceng065-hub/tripcanvas-shitu",
+  "repositoryVisibility": "private",
+  "neonProjectId": "lucky-forest-96010136",
+  "neonPlan": "free",
+  "database": "PostgreSQL 17",
+  "credentials": "Only in hosting environment and authorized CLI profiles; excluded from source"
+}

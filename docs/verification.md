@@ -20,3 +20,7 @@
 ## Render / Neon 免费部署适配
 
 前端 14 项、后端 13 项测试通过：包含唤醒失败恢复、共享连接请求、唤醒 HTML 页面处理、有限重试和不重复发送写操作；云端拒绝 SQLite。TypeScript 类型检查通过。云端集成验证仍待账号授权、实际数据库和服务创建。
+
+## 2026-11-04：Render + Neon 上线验证
+
+Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanvas-api.onrender.com。真实 HTTPS 验证通过：health 返回 PostgreSQL，跨源允许 Sites 来源，注册、无 Cookie 的 Bearer 登录、同步写入和读取、快照分享与撤销、道路路线、退出和会话撤销。临时测试账号及行程已清理。前端 14 项、后端 13 项测试通过，生产构建默认连接该服务。模型仍未配置。

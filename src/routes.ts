@@ -1,5 +1,5 @@
 import { ref, watch, onUnmounted, type Ref } from 'vue'
-import { api, apiAvailable, checkAPI } from './api'
+import { api, apiAvailable, checkAPI, backendConfigured } from './api'
 import { placeById, type Trip } from './domain'
 
 export interface RoadRoute {
@@ -50,7 +50,7 @@ async function fetchRoute(mode: Trip['mode'], ids: string[], signal?: AbortSigna
   await checkAPI()
   signal?.throwIfAborted()
   // Configured production backends never silently fall back to a public provider.
-  if (apiAvailable || import.meta.env.VITE_API_BASE) {
+  if (apiAvailable || backendConfigured) {
     const value: RoadRoute = await api('/routes','POST',{mode,placeIds:ids},signal)
     if (!validRoute(value,mode,ids)) throw new Error('后端返回的路线不完整')
     return value

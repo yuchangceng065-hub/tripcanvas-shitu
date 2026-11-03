@@ -1,7 +1,8 @@
 import { reactive } from 'vue'
 import type { Proposal, Trip } from './domain'
-const base=(import.meta.env.VITE_API_BASE || '/api/v1').replace(/\/$/,'')
-export const backendConfigured=!!import.meta.env.VITE_API_BASE
+const deployedAPI=import.meta.env.PROD?'https://tripcanvas-api.onrender.com/api/v1':''
+const base=(import.meta.env.VITE_API_BASE || deployedAPI || '/api/v1').replace(/\/$/,'')
+export const backendConfigured=!!(import.meta.env.VITE_API_BASE||deployedAPI)
 export const connection=reactive({status:'idle' as 'idle'|'checking'|'waking'|'online'|'offline'|'local',attempt:0})
 export let apiAvailable=false
 interface Health {status:'ok';model:boolean;storage?:string}

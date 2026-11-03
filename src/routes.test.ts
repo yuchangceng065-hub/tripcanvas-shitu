@@ -3,7 +3,7 @@ import { createRenderer,ref,nextTick } from 'vue'
 import { createTrip,clone,schedule,validate } from './domain'
 import { matchesRoute,routeKey,normalizeOSRM,useRoadRoutes,type RoadRoute } from './routes'
 import { api } from './api'
-vi.mock('./api',()=>({apiAvailable:true,checkAPI:vi.fn(async()=>({status:'ok'})),api:vi.fn()}))
+vi.mock('./api',()=>({apiAvailable:true,backendConfigured:true,checkAPI:vi.fn(async()=>({status:'ok'})),api:vi.fn()}))
 function road(ids:string[],minutes=20):RoadRoute{return {mode:'walk',placeIds:ids,source:'osrm',legs:ids.slice(1).map(()=>({minutes,distance:1.5})),geometry:{type:'LineString',coordinates:[[120.13,30.25],[120.14,30.26]]},waypoints:ids.map(()=>({location:[120.13,30.25],distance:0})),fetchedAt:Date.now(),cached:false}}
 afterEach(()=>{vi.useRealTimers();vi.clearAllMocks()})
 describe('真实道路排程',()=>{

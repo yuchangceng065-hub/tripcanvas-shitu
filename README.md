@@ -15,11 +15,11 @@
 
 ## 已知边界
 
-当前托管版本是静态前端，数据保存在当前浏览器。Sites 不执行 Python，FastAPI 需单独运行或部署；注册、云端同步和可撤销链接仅在连接后端时工作。
+线上前端通过 HTTPS 连接 Render Free 的 FastAPI，数据存储在 Neon Free PostgreSQL。已验证注册登录、行程同步、版本记录、可撤销分享与道路路线。浏览器也保存本地副本。API：https://tripcanvas-api.onrender.com/api/v1/health。
 
 地图与路线已完成真实调用验证，地点使用 OSM WGS84 坐标，来源见 docs/map-sources.json。路线失败时明确显示错误和估算标签。道路用时不包含实时交通、停车与景区步行衔接。地点选择仍限于杭州目录，尚未实现任意城市搜索。模型未配置。
 
-当前 owner-private 前端在 Python 未连接时直接访问 FOSSGIS 路线服务，串行限速并缓存 24 小时。配置 VITE_API_BASE 后统一通过 Python 路线代理，不再自动退回直连。公开多用户使用前必须接通后端，并选择满足容量的路线服务。
+线上 owner-private 前端通过 Python 路线代理访问 FOSSGIS，道路请求按日合并、串行限速并缓存 24 小时。未启动后端的本地开发体验可直连公共路线服务。公开多用户使用前需要选择满足容量的路线服务。
 
 生成建议是“请求完成后返回结构化结果”；SSE 接口可读取已完成运行事件，尚未实现逐阶段后台持久任务。当前数据库使用 SQLAlchemy 自动创建初始表；后续变更应加入 Alembic 迁移。Docker/PostgreSQL 配置已提供，但本次自动化验证使用 SQLite。
 
@@ -92,6 +92,6 @@ npm run build
 
 ## 免费云端部署
 
-采用 Render Free + Neon Free，配置在 `render.yaml`，步骤见 `docs/render-neon-deployment.md`。前端已加入有限时长的唤醒等待、状态提示和手动重连；失败的写请求不会自动重发。云端要求 PostgreSQL，不允许临时 SQLite。账号授权和实际服务创建完成后，才能填写线上 API 地址；当前配置文件不代表后端已经上线。
+采用 Render Free + Neon Free，配置在 `render.yaml`，步骤见 `docs/render-neon-deployment.md`。前端已加入有限时长的唤醒等待、状态提示和手动重连；失败的写请求不会自动重发。云端要求 PostgreSQL，不允许临时 SQLite。Render 服务和 Neon 数据库均已创建并验证，生产构建默认指向真实 API；VITE_API_BASE 可覆盖该公开地址。本地开发仍使用 Vite /api 代理。公开部署信息见 docs/deployment.json，不包含凭据。
 
 此前 Railway 部署被新账号试用限制阻止，不再作为首选。
