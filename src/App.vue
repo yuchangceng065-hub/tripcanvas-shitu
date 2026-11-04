@@ -13,7 +13,7 @@ import {ApiError} from './apiError'
 import { useTrips } from './store'
 import { places,placeById,createTrip,clone,uid,time,schedule,validate,suggest,lockedChanges,registerPlaces,capturePlaces,departureDelay,departureProposal,validDepartureProposal,proposalErrors,returnAnchor,type Trip,type Activity,type Proposal,type Place,type Mobility } from './domain'
 import {checkAPI,api,remoteSuggestion,setToken,connection,backendConfigured,confirmTrip} from './api'
-import {useRoadRoutes,routeKey,loadRoute,walkingKm,type RouteMap} from './routes'
+import {useRoadRoutes,routeKey,loadRoute,walkingKm,freshness,type RouteMap} from './routes'
 const store=useTrips()
 const page=ref<'canvas'|'trips'|'favorites'>('canvas'),dayIndex=ref(0),selected=ref(''),modal=ref(''),toast=ref(''),search=ref(''),dragging=ref(''),tabMobile=ref('plan')
 const trip=computed(()=>store.trips.find(t=>t.id===store.activeId)||store.trips[0]!)
@@ -23,6 +23,7 @@ const routeReady=computed(()=>routeState.value.status==='ready'||entries.value.l
 const checkedDays=computed(()=>trip.value.days.filter((d,i)=>d.activities.length<2||roadRoutes.value[routeKey(trip.value,i)]).length)
 const currentRoadRoute=computed(()=>roadRoutes.value[routeKey(trip.value,dayIndex.value)])
 const dayWalk=computed(()=>walkingKm(currentRoadRoute.value,trip.value.mode))
+const routeFreshness=computed(()=>currentRoadRoute.value?freshness(currentRoadRoute.value):null)
 const mixedRoute=computed(()=>currentRoadRoute.value?.source==='amap')
 const selectedEntry=computed(()=>entries.value.find(e=>e.activity.id===selected.value))
 const allIssues=computed(()=>validate(trip.value,roadRoutes.value)),errors=computed(()=>allIssues.value.filter(x=>x.severity==='error'))
@@ -248,7 +249,7 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';await check
      <TripMap :entries="entries" :selected="selected" :state="routeState" :mode="trip.mode" @select="selected=$event" @retry="refreshRoute"/>
      <div v-if="selectedEntry" class="map-place-card"><img :src="imageFor(selectedEntry.place.image)" alt="旅行氛围配图"/><div><div class="map-place-label">这一站 · {{selectedEntry.place.kind}}</div><h3>{{selectedEntry.place.name}}</h3><p>{{selectedEntry.place.tag}}<span> · {{selectedEntry.activity.duration}} 分钟</span></p></div><button class="icon-button" @click="edit(selectedEntry.activity.id)" aria-label="查看地点详情"><ArrowUpRight :size="19"/></button></div>
      <div class="map-stats"><div><span><MapPin :size="14"/>今日地点</span><strong>{{entries.length}}<small> 个</small></strong></div><div><span><Footprints :size="14"/>{{routeReady?(mixedRoute?'转场距离':'道路里程'):'估算里程'}}</span><strong>{{distance.toFixed(1)}}<small> km</small></strong></div><div><span><Clock :size="14"/>{{routeReady?(mixedRoute?'完整转场用时':'道路用时'):'估算用时'}}</span><strong>{{totalTravel}}<small> 分钟</small></strong></div><div><span>个人预算</span><strong><small>¥ </small>{{budget}}</strong></div></div>
-     <div v-if="mixedRoute&&trip.mode==='drive'&&!currentRoadRoute?.accessConfirmed" class="parking-warning"><AlertTriangle :size="13"/><span>按首站停车点已有车辆计算，推荐停车点的车位与开放情况待确认。</span><button @click="openModal('mobility')">确认停车点</button></div><div class="map-route-note">{{routeReady?(mixedRoute?'高德当前查询估时，非出行日路况预测；转场包含步行与设置的停车预留。':'道路时间未计步行接驳、停车和实时路况。'):'路线未核验，当前时间与里程仅为粗略估算。'}} <span v-if="entries.some(e=>e.place.costKnown===false)">部分地点费用未知，预算仅汇总已知金额。</span><span v-if="routeState.route?.waypoints.some(w=>w.distance>100)">虚线连接地点与附近道路。</span></div>
+     <div v-if="mixedRoute&&trip.mode==='drive'&&!currentRoadRoute?.accessConfirmed" class="parking-warning"><AlertTriangle :size="13"/><span>按首站停车点已有车辆计算，推荐停车点的车位与开放情况待确认。</span><button @click="openModal('mobility')">确认停车点</button></div><div class="map-route-note">{{routeReady?(mixedRoute?'高德当前查询估时，非出行日路况预测；转场包含步行与设置的停车预留。':'道路时间未计步行接驳、停车和实时路况。'):'路线未核验，当前时间与里程仅为粗略估算。'}} <span v-if="entries.some(e=>e.place.costKnown===false)">部分地点费用未知，预算仅汇总已知金额。</span><span v-if="routeState.route?.waypoints.some(w=>w.distance>100)">虚线连接地点与附近道路。</span><span v-if="routeFreshness" class="route-freshness">{{routeFreshness.label}}<button v-if="routeFreshness.expired" @click="refreshRoute">重新计算</button></span></div>
     </section>
     <aside class="assistant-panel" :class="{'mobile-show':tabMobile==='ai'}">
      <div class="assistant-header"><span class="spark-icon"><Sparkles :size="19"/></span><div><h2>你的旅行搭子</h2><p>一起，把旅程调整到刚刚好。</p></div><span class="ai-badge">{{hasModel&&user?'AI 已连接':'规则规划'}}</span></div>

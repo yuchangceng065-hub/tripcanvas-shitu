@@ -141,3 +141,12 @@ export function useRoadRoutes(trip: Ref<Trip>, activeDay: Ref<number>) {
   onUnmounted(() => {stop();generation++;clearTimeout(timer)})
   return {routes,state,refresh:() => retry.value++}
 }
+
+export function freshness(route:RoadRoute,now=Date.now()){
+ const expiry=route.expiresAt??route.fetchedAt+ttl
+ const clock=new Date(route.fetchedAt).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})
+ const remaining=expiry-now
+ if(remaining<=0)return {label:`查询于 ${clock} · 估时已过期`,expired:true,minutes:0}
+ const minutes=Math.max(1,Math.ceil(remaining/60000))
+ return {label:`查询于 ${clock} · ${minutes>=120?`${Math.round(minutes/60)} 小时内有效`:`${minutes} 分钟内有效`}`,expired:false,minutes}
+}

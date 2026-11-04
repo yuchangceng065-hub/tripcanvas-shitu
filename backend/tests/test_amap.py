@@ -106,3 +106,20 @@ def test_internal_parking_is_not_automatically_selected():
             with pytest.raises(HTTPException) as e:await service.route(RouteBody(mode='drive',placeIds=['a','b']))
             assert e.value.status_code==422 and '通行' in e.value.detail
     asyncio.run(run())
+
+def test_changing_parking_moves_the_vehicle_and_keeps_it_for_shared_stops():
+    async def run():
+        calls=[];pois=fixture_pois()
+        async with httpx.AsyncClient(transport=transport(calls)) as client:
+            service=AmapService(client,pois,lambda c:None,lambda p:p,interval=0)
+            r=await service.route(RouteBody(mode='drive',placeIds=['a','b','c'],
+                parkingByPlace={'a':'amap:x','b':'amap:y','c':'amap:y'}))
+            first,second=r['legs'][0]['segments'],r['legs'][1]['segments']
+            assert [s['mode'] for s in first]==['walk','transfer','drive','transfer','walk']
+            assert '停车场Y' in first[2]['label']
+            assert [s['mode'] for s in second]==['walk']
+            assert '车辆仍停在' in second[0]['label'] and '停车场Y' in second[0]['label']
+            drives=[call for call in calls if call.url.path.endswith('driving')]
+            assert len(drives)==1
+            assert r['accessPoints'][1]['parking']['id']=='amap:y' and r['accessConfirmed']
+    asyncio.run(run())

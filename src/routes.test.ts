@@ -1,7 +1,7 @@
 import { describe,it,expect,vi,afterEach } from 'vitest'
 import { createRenderer,ref,nextTick } from 'vue'
 import { createTrip,clone,schedule,validate } from './domain'
-import { matchesRoute,routeKey,normalizeOSRM,useRoadRoutes,validRoute,walkingKm,type RoadRoute } from './routes'
+import { matchesRoute,routeKey,normalizeOSRM,useRoadRoutes,validRoute,walkingKm,freshness,type RoadRoute } from './routes'
 import { api } from './api'
 vi.mock('./api',()=>({connection:{routing:'osrm',map:'osm'},apiAvailable:true,backendConfigured:true,checkAPI:vi.fn(async()=>({status:'ok'})),api:vi.fn()}))
 function road(ids:string[],minutes=20):RoadRoute{return {mode:'walk',placeIds:ids,source:'osrm',legs:ids.slice(1).map(()=>({minutes,distance:1.5})),geometry:{type:'LineString',coordinates:[[120.13,30.25],[120.14,30.26]]},waypoints:ids.map(()=>({location:[120.13,30.25],distance:0})),fetchedAt:Date.now(),cached:false}}
@@ -52,5 +52,18 @@ describe('步行距离统计',()=>{
   expect(walkingKm(undefined,'walk')).toBeNull()
   const drive:RoadRoute={...road(['a','b']),mode:'drive'}
   expect(walkingKm(drive,'drive')).toBeNull()
+ })
+})
+
+describe('路线新鲜度',()=>{
+ it('驾车估时到期后明确标记过期',()=>{
+  const now=Date.parse('2026-11-04T12:10:00+08:00')
+  const route:RoadRoute={...road(['a','b']),source:'amap',mode:'drive',fetchedAt:Date.parse('2026-11-04T12:00:00+08:00'),expiresAt:Date.parse('2026-11-04T12:05:00+08:00')}
+  const stale=freshness(route,now)
+  expect(stale.expired).toBe(true)
+  expect(stale.label).toContain('已过期')
+  const fresh= freshness(route,Date.parse('2026-11-04T12:02:30+08:00'))
+  expect(fresh.expired).toBe(false)
+  expect(fresh.minutes).toBe(3)
  })
 })

@@ -42,3 +42,5 @@
 .repair-options button{border:1px solid #cfdcc3;border-radius:6px;padding:6px 9px;font-size:10px;color:#3f6044;background:#f4f8ee}
 .repair-options button:hover{background:#e9f0e1}
 .walk-chip{margin-left:8px;padding:2px 6px;border-radius:4px;background:#eef3e8;color:#68835a;font-size:9px}
+.route-freshness{display:inline-flex;align-items:center;gap:6px;margin-left:10px;color:#8b9a80}
+.route-freshness button{font-size:9px;color:#3f6044;text-decoration:underline}
