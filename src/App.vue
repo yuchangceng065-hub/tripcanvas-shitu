@@ -5,8 +5,10 @@ import TripMap from './components/TripMap.vue'
 import PlacePicker from './components/PlacePicker.vue'
 import TripBuilder from './components/TripBuilder.vue'
 import {coordinateProposal,coordinationViolations,earlierProposal} from './coordination'
+import {extractVisitQuery,normalizePlaceQuery,visitProposal} from './placeIntent'
+import {handleComposerKeydown} from './composerKeyboard'
 import { useTrips } from './store'
-import { places,placeById,createTrip,clone,uid,time,schedule,validate,suggest,lockedChanges,registerPlaces,capturePlaces,departureDelay,departureProposal,validDepartureProposal,proposalErrors,returnAnchor,type Trip,type Activity,type Proposal } from './domain'
+import { places,placeById,createTrip,clone,uid,time,schedule,validate,suggest,lockedChanges,registerPlaces,capturePlaces,departureDelay,departureProposal,validDepartureProposal,proposalErrors,returnAnchor,type Trip,type Activity,type Proposal,type Place } from './domain'
 import {checkAPI,api,remoteSuggestion,setToken,connection,backendConfigured} from './api'
 import {useRoadRoutes,routeKey,loadRoute,type RouteMap} from './routes'
 const store=useTrips()
@@ -23,24 +25,26 @@ const daysLabel=computed(()=>`${shortDate(trip.value.days[0]!.date)} — ${short
 const proposal=ref<Proposal|null>(null),prompt=ref(''),busy=ref(false),response=ref(''),backend=computed(()=>connection.status==='online'),hasModel=ref(false),user=ref<{username:string}|null>(null),loginMode=ref(false),username=ref(''),password=ref(''),authError=ref(''),accountBusy=ref(false)
 const proposalRoutes=ref<RouteMap>({}),proposalRouteError=ref('')
 const busyText=ref('正在检查可调整的安排…')
+const visitSearch=ref<{query:string;places:Place[];tripId:string;revision:number;day:number}|null>(null),visitLookupQuery=ref('')
+const composerInput=ref<HTMLTextAreaElement|null>(null)
 const proposalIssues=computed(()=>proposal.value?proposalErrors(trip.value,proposal.value.trip,proposalRoutes.value,proposal.value.coordination?.day):[])
-const departureRows=computed(()=>{const p=proposal.value;if(!p?.departure&&!p?.coordination)return [];const day=p.departure?.day??p.coordination!.day;const old=schedule(trip.value,day,proposalRoutes.value[routeKey(trip.value,day)]),next=schedule(p.trip,day,proposalRoutes.value[routeKey(p.trip,day)]);return [...next.map(e=>({id:e.activity.id,name:e.place.name,before:old.find(o=>o.activity.id===e.activity.id),after:e})),...old.filter(e=>!next.some(n=>n.activity.id===e.activity.id)).map(e=>({id:e.activity.id,name:e.place.name,before:e,after:undefined}))]})
+const departureRows=computed(()=>{const p=proposal.value;if(!p?.departure&&!p?.coordination&&!p?.visit)return [];const day=p.departure?.day??p.coordination?.day??p.visit!.day;const old=schedule(trip.value,day,proposalRoutes.value[routeKey(trip.value,day)]),next=schedule(p.trip,day,proposalRoutes.value[routeKey(p.trip,day)]);return [...next.map(e=>({id:e.activity.id,name:e.place.name,before:old.find(o=>o.activity.id===e.activity.id),after:e})),...old.filter(e=>!next.some(n=>n.activity.id===e.activity.id)).map(e=>({id:e.activity.id,name:e.place.name,before:e,after:undefined}))]})
+const visitEntry=computed(()=>{const p=proposal.value;if(!p?.visit)return;return schedule(p.trip,p.visit.day,proposalRoutes.value[routeKey(p.trip,p.visit.day)]).find(e=>e.place.id===p.visit!.placeId)})
 const canShiftFixed=computed(()=>proposal.value?.departure&&trip.value.days[proposal.value.departure.day]!.activities.some(a=>a.lock==='fixed'&&!returnAnchor(trip.value,proposal.value!.departure!.day,a)))
 const builderKey=ref(0),resumeBuilder=ref(false)
-const promptComposing=ref(false)
 const assistantScroll=ref<HTMLElement|null>(null)
 watch([busy,response],async()=>{
  await nextTick()
  const panel=assistantScroll.value;if(!panel)return
- const card=proposal.value?.departure||proposal.value?.coordination?panel.querySelector<HTMLElement>('.proposal-card'):null
+ const card=busy.value?panel.querySelector<HTMLElement>('.assistant-message:not(.response)'):visitSearch.value?panel.querySelector<HTMLElement>('.visit-search-card'):proposal.value?.departure||proposal.value?.coordination||proposal.value?.visit?panel.querySelector<HTMLElement>('.proposal-card'):null
  if(card)panel.scrollTop+=card.getBoundingClientRect().top-panel.getBoundingClientRect().top
  else panel.scrollTop=panel.scrollHeight
 })
 function onPromptKeydown(event:KeyboardEvent){
- if(event.key!=='Enter'||event.shiftKey||event.isComposing||promptComposing.value||event.keyCode===229)return
- event.preventDefault()
- void generate()
+ handleComposerKeydown(event,text=>{prompt.value=text;void generate(text)})
 }
+function syncComposerValue(event:CompositionEvent){prompt.value=(event.target as HTMLTextAreaElement).value}
+function submitComposer(){const text=composerInput.value?.value??prompt.value;prompt.value=text;void generate(text)}
 function acceptDraft(t:Trip){registerPlaces(t.placeSnapshots);store.add(t);syncTrip(t);openTrip(t.id);modal.value='';builderKey.value++;notify('旅行草案已确认保存')}
 const deletingTrip=ref<string|null>(null)
 async function deleteTrip(){if(!deletingTrip.value)return;const id=deletingTrip.value;if(backend.value&&user.value){try{await api('/trips/'+id,'DELETE')}catch(e){notify((e as Error).message);return}}store.remove(id);modal.value='';deletingTrip.value=null;notify('旅行已删除')}
@@ -60,6 +64,7 @@ onMounted(()=>document.addEventListener('keydown',onKeyboard));onUnmounted(()=>d
 function openModal(name:string){modal.value=name;search.value='';authError.value=''}
 function changeDay(i:number){dayIndex.value=i;selected.value=entries.value[0]?.activity.id||'';proposal.value=null;response.value=''}
 function openTrip(id:string){store.activeId=id;dayIndex.value=0;page.value='canvas';selected.value=entries.value[0]?.activity.id||'';proposal.value=null}
+watch(()=>[trip.value.id,trip.value.revision,dayIndex.value],()=>{visitSearch.value=null})
 function commit(next:Trip,label:string,expected=trip.value.revision){try{if(next.requirements){next.requirements.mode=next.mode;next.requirements.people=next.people}capturePlaces(next);store.commit(next,label,expected);savedAt.value='刚刚保存';proposal.value=null;syncTrip(next);return true}catch(e){notify((e as Error).message);return false}}
 async function syncTrip(t:Trip){if(backend.value&&user.value){try{await api('/trips/'+t.id,'PUT',{trip:t});savedAt.value='已同步到云端'}catch{savedAt.value='已保存本地 · 同步失败'}}}
 function toggleLock(id:string){const n=clone(trip.value);const a=n.days[dayIndex.value]!.activities.find(a=>a.id===id)!;const start=entries.value.find(e=>e.activity.id===id)!.start;a.lock=a.lock==='none'?'keep':a.lock==='keep'?'fixed':'none';a.fixedStart=a.lock==='fixed'?start:undefined;commit(n,'更新锁定条件');notify(a.lock==='none'?'已解除锁定':a.lock==='keep'?'已设为必须保留，再点一次可固定时间':'已固定地点和时间')}
@@ -69,11 +74,33 @@ function removeActivity(id:string){const n=clone(trip.value);const a=n.days[dayI
 function edit(id:string){const a=trip.value.days[dayIndex.value]!.activities.find(a=>a.id===id)!;editActivity.value=clone(a);editDuration.value=a.duration;editDate.value=dayIndex.value;openModal('edit')}
 function saveEdit(){if(!editActivity.value)return;const a=editActivity.value;if(a.lock==='fixed'&&(editDuration.value!==a.duration||editDate.value!==dayIndex.value)){notify('固定安排不能更改时间，请先解除锁定');return}const n=clone(trip.value);const index=n.days[dayIndex.value]!.activities.findIndex(x=>x.id===a.id);n.days[dayIndex.value]!.activities.splice(index,1);a.duration=Number(editDuration.value);if(editDate.value===dayIndex.value)n.days[dayIndex.value]!.activities.splice(index,0,a);else n.days[editDate.value]!.activities.push(a);commit(n,'编辑活动安排');modal.value=''}
 function addPlace(id:string){const n=clone(trip.value);const a={id:uid(),placeId:id,duration:placeById(id).duration,lock:'none' as const};n.days[dayIndex.value]!.activities.push(a);commit(n,'添加 '+placeById(id).name);selected.value=a.id;modal.value='';notify('已添加到当天行程')}
+function assertCurrent(before:Trip,day:number){if(trip.value.id!==before.id||trip.value.revision!==before.revision||dayIndex.value!==day)throw new Error('行程或日期已变化，请重新搜索并规划')}
+async function lookupVisitPlaces(query:string,before:Trip,day:number){
+ const q=normalizePlaceQuery(query);if(q.length<2||q.length>80)throw new Error('请输入 2—80 个字的地点或校区名称')
+ busyText.value=`正在搜索 ${q}…`
+ const data=await api('/places/search?q='+encodeURIComponent(q));assertCurrent(before,day)
+ registerPlaces(data.places)
+ const matches:Place[]=data.places.map((p:Place)=>places.find(seed=>!!seed.coordinateSource&&seed.coordinateSource===p.coordinateSource)||p)
+ const unique=matches.filter((p,i)=>matches.findIndex(other=>other.id===p.id)===i)
+ visitSearch.value={query:q,places:unique,tripId:before.id,revision:before.revision,day};visitLookupQuery.value=q
+ response.value=unique.length?`找到 ${unique.length} 个相关地点，请按校区和地址确认后重新规划。`:'没有找到匹配地点，当前覆盖杭州周边；可换用完整地点或校区名称。'
+}
+async function refineVisitSearch(){if(busy.value)return;busy.value=true;response.value='';try{await lookupVisitPlaces(visitLookupQuery.value,clone(trip.value),dayIndex.value)}catch(e){response.value=(e as Error).message}finally{busy.value=false}}
+async function chooseVisit(id:string){
+ const context=visitSearch.value;if(!context||busy.value)return
+ if(context.tripId!==trip.value.id||context.revision!==trip.value.revision||context.day!==dayIndex.value){visitSearch.value=null;notify('行程已变化，请重新搜索');return}
+ const place=context.places.find(p=>p.id===id);if(!place)return
+ const before=clone(trip.value),day=context.day
+ busy.value=true;busyText.value='正在把选中地点加入路线并核验道路…';proposal.value=null;response.value='';proposalRouteError.value='';proposalRoutes.value={...roadRoutes.value}
+ try{let next=visitProposal(before,day,place,context.query);if(next.trip.days[day]!.activities.length>1)proposalRoutes.value[routeKey(next.trip,day)]=await loadRoute(next.trip,day);next=await coordinateProposal(before,next,day,proposalRoutes.value,loadRoute,text=>busyText.value=text);assertCurrent(before,day);proposal.value=next;visitSearch.value=null;response.value=next.summary}catch(e){response.value=(e as Error).message}finally{busy.value=false}
+}
 async function generate(text=prompt.value){
  if(busy.value||!text.trim())return
- busy.value=true;busyText.value='正在生成调整方案…';prompt.value=text;proposal.value=null;response.value='';proposalRouteError.value='';proposalRoutes.value={...roadRoutes.value}
+ busy.value=true;busyText.value='正在生成调整方案…';prompt.value=text;proposal.value=null;visitSearch.value=null;response.value='';proposalRouteError.value='';proposalRoutes.value={...roadRoutes.value}
  const before=clone(trip.value),day=dayIndex.value
  try{
+  const query=extractVisitQuery(text)
+  if(query){await lookupVisitPlaces(query,before,day);return}
   let next:Proposal
   const delay=departureDelay(text)
   if(delay!==null)next=departureProposal(before,day,delay)
@@ -100,12 +127,13 @@ function applyProposal(){
  if(!proposal.value||busy.value)return
  const p=proposal.value
  if(p.trip.id!==trip.value.id||p.baseRevision!==trip.value.revision){notify('行程已变化，请重新生成方案');return}
+ if(p.visit&&!p.trip.days[p.visit.day]?.activities.some(a=>a.placeId===p.visit!.placeId&&a.lock!=='none')){notify('选中的目的地未保留，请重新规划');return}
  const violations=p.coordination?coordinationViolations(trip.value,p,proposalRoutes.value):p.departure?(validDepartureProposal(trip.value,p,proposalRoutes.value)?[]:['顺延方案已失效，请重新生成']):lockedChanges(trip.value,p.trip)
  if(violations.length){notify(violations.join('；'));return}
  if(proposalRouteError.value){notify('请先重新生成，完成道路路线核验');return}
  if(proposalIssues.value.length){notify('方案中仍有时间冲突，请先调整条件');return}
  Object.assign(roadRoutes.value,proposalRoutes.value)
- if(commit(p.trip,'应用智能调整',p.baseRevision))notify('新的安排已应用，可以在历史版本中恢复')
+ if(commit(p.trip,'应用智能调整',p.baseRevision)){if(p.visit)selected.value=p.trip.days[p.visit.day]!.activities.find(a=>a.placeId===p.visit!.placeId)!.id;notify(p.visit?'已加入选中地点并更新道路路线，可在历史版本中恢复':'新的安排已应用，可以在历史版本中恢复')}
 }
 function restore(id:string){const v=store.versions[trip.value.id]?.find(x=>x.id===id);if(!v)return;commit(clone(v.trip),'恢复历史版本');modal.value='';notify('已恢复，并保留所有历史记录')}
 function setMode(){const t=clone(trip.value);t.mode=t.mode==='walk'?'drive':'walk';commit(t,'切换交通方式')}
@@ -173,15 +201,17 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=
       <div class="protected-note"><LockKeyhole :size="14"/><p>你锁定的安排，会好好保留。<span>调整前可以预览，确认后再应用。</span></p></div>
       <div v-if="busy" class="assistant-message" role="status"><LoaderCircle :size="17" class="spin"/>{{busyText}}</div>
       <div v-if="response" class="assistant-message response" role="status"><Sparkles :size="16"/><p>{{response}}</p></div>
-      <div v-if="proposal" class="proposal-card"><div class="proposal-head"><span>{{proposal.departure?'整体顺延预览':'调整预览'}}</span><small>{{proposal.source==='schedule'?'排程计算 · ':''}}Day {{dayIndex+1}}</small></div>
+      <section v-if="visitSearch" class="visit-search-card" aria-label="确认想去的具体地点"><h3>选择具体地点，再规划。</h3><p>加入 Day {{visitSearch.day+1}}，核验路线并协调时间。选中的地点会设为必须保留。</p><form class="visit-refine" @submit.prevent="refineVisitSearch"><input v-model="visitLookupQuery" :readonly="busy" aria-label="地点或校区名称" maxlength="80"/><button type="submit" class="button quiet small" :disabled="busy||visitLookupQuery.trim().length<2">重新搜索</button></form><article v-for="p in visitSearch.places" :key="p.id"><strong>{{p.name}}</strong><p>{{p.address||p.tag}}</p><a v-if="p.coordinateSource" :href="p.coordinateSource" target="_blank" rel="noopener noreferrer">核对地图位置<ExternalLink :size="11"/></a><button class="button primary small full" :disabled="busy" :aria-label="`规划到${p.name}`" @click="chooseVisit(p.id)">选此地点并重新规划<ArrowRight :size="13"/></button></article><p v-if="!visitSearch.places.length">没有匹配结果，请输入完整地点或校区名称。</p><small>© OpenStreetMap contributors · Photon 真实地点搜索</small><button class="text-button full" @click="visitSearch=null;response=''" :disabled="busy">暂不添加</button></section>
+      <div v-if="proposal" class="proposal-card"><div class="proposal-head"><span>{{proposal.visit?'新地点路线预览':proposal.departure?'整体顺延预览':'调整预览'}}</span><small>{{proposal.source==='schedule'?'排程计算 · ':''}}Day {{dayIndex+1}}</small></div>
+       <div v-if="visitEntry" class="visit-confirmed"><strong>{{visitEntry.place.name}}</strong><span>Day {{proposal.visit!.day+1}} · {{time(visitEntry.start)}}—{{time(visitEntry.end)}} · 必须保留</span><small>已按{{proposal.trip.mode==='walk'?'步行':'驾车'}}道路路线规划；确认后更新画布。</small></div>
        <div v-if="proposal.departure" class="departure-options"><label v-if="canShiftFixed"><input type="checkbox" :disabled="busy" :checked="proposal.departure.shiftFixed" @change="changeDepartureOption($event,'shiftFixed')"/>固定游览安排也顺延</label><label><input type="checkbox" :disabled="busy" :checked="proposal.departure.extendEnd" @change="changeDepartureOption($event,'extendEnd')"/>允许当天结束时间延后</label><small>优先保留地点与顺序；必要时协调未锁定停留。勾选后先预览，返程期限保持。</small></div>
        <div v-if="proposal.coordination" class="coordination-note" :class="{unresolved:!proposal.coordination.resolved}"><strong>{{proposal.coordination.resolved?'已自动协调时间':'自动协调后仍有冲突'}}</strong><span>{{proposal.coordination.resolved?'已核验道路时间并保留锁定安排，具体变化如下。':'当前固定条件下尚未找到可行安排，可选择下方备选出发时间，或调整锁定条件。'}}</span><span v-for="warning in proposal.coordination.warnings" :key="warning">{{warning}}</span></div>
        <p v-for="(change,i) in proposal.changes" :key="i"><ArrowRight :size="14"/>{{change}}</p>
        <details v-if="departureRows.length" :open="!!proposal.departure" class="time-comparison"><summary>逐站时间对比</summary><div class="departure-timeline" aria-label="逐站时间对比"><div class="departure-row departure-row-head"><span>地点</span><span>原安排</span><span>新安排</span></div><div v-for="row in departureRows" :key="row.id" class="departure-row"><strong>{{row.name}}</strong><span v-if="row.before">{{time(row.before.start)}}<small>— {{time(row.before.end)}}</small></span><span v-else>新增</span><span v-if="row.after" :class="{late:row.after.conflict}">{{time(row.after.start)}}<small>— {{time(row.after.end)}}</small></span><span v-else>本次移除</span></div></div></details>
        <div v-for="(issue,i) in proposalIssues" :key="`${issue.id}-${i}`" class="proposal-error"><AlertTriangle :size="14"/>{{issue.message}}</div><button v-if="proposal.coordination?.earlierStart!==undefined&&!proposal.coordination.resolved" class="button quiet full earlier-option" :disabled="busy" @click="useEarlierStart">改为 {{time(proposal.coordination.earlierStart)}} 出发并预览</button><p v-if="proposalRouteError" class="proposal-error">{{proposalRouteError}}，请重新生成。</p><button class="button primary" @click="applyProposal" :disabled="busy||proposalIssues.length>0||!!proposalRouteError"><Check :size="16"/>{{proposal.departure?'确认顺延并应用':'应用这个安排'}}</button><button class="text-button" @click="proposal=null;response=''">保留原计划</button></div>
      </div>
-     <form class="composer" @submit.prevent="generate()"><textarea v-model="prompt" rows="2" placeholder="说说你想怎么调整今天…" aria-label="行程调整需求" aria-describedby="composer-help" :disabled="busy" @keydown="onPromptKeydown" @compositionstart="promptComposing=true" @compositionend="promptComposing=false"/><p id="composer-help" class="composer-help">Enter 发送 · Shift+Enter 换行</p><div><span><Sparkles :size="12"/>仅调整 Day {{dayIndex+1}}</span><button type="submit" :disabled="busy||!prompt.trim()" aria-label="发送调整需求"><LoaderCircle v-if="busy" class="spin" :size="16"/><ArrowUp v-else :size="17"/></button></div></form>
-     <p class="assistant-disclaimer">{{proposal?.source==='schedule'?'本次为道路排程计算，确认后才应用':hasModel&&user?'建议仍需结合实际情况确认':'示例助手使用规则建议，非实时模型回答'}}</p>
+     <form class="composer" @submit.prevent="submitComposer"><textarea ref="composerInput" v-model="prompt" rows="2" placeholder="想去哪？例如：我想参观浙工大" aria-label="行程调整需求" aria-describedby="composer-help" :readonly="busy" :aria-busy="busy" @keydown="onPromptKeydown" @compositionend="syncComposerValue"/><p id="composer-help" class="composer-help">选词后 Enter 发送 · Shift+Enter 换行</p><div><span><Sparkles :size="12"/>仅调整 Day {{dayIndex+1}}</span><button type="submit" :disabled="busy||!prompt.trim()" aria-label="发送调整需求"><LoaderCircle v-if="busy" class="spin" :size="16"/><ArrowUp v-else :size="17"/></button></div></form>
+     <p class="assistant-disclaimer">{{proposal?.source==='schedule'?'本次为地点与道路排程计算，确认后才应用':hasModel&&user?'建议仍需结合实际情况确认':'可搜索地点并规划路线；AI 自由调整需登录'}}</p>
     </aside>
    </section>
    <footer class="workspace-footer"><span><Leaf :size="13"/>把时间留给风景，把计划交给拾途。</span><button @click="openModal('help')">示例数据与图片说明<ArrowUpRight :size="12"/></button></footer>

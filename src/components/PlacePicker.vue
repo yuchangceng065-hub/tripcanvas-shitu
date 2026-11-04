@@ -3,12 +3,13 @@ import {ref,computed} from 'vue'
 import {Search,Plus,Check,MapPin,LoaderCircle,ExternalLink,Heart} from '@lucide/vue'
 import {places,registerPlaces,type Place} from '../domain'
 import {api} from '../api'
+import {normalizePlaceQuery} from '../placeIntent'
 const props=defineProps<{selected?:string[];label?:string;favorites?:string[]}>()
 const emit=defineEmits<{choose:[place:Place];favorite:[id:string]}>()
 const query=ref(''),results=ref<Place[]>([]),busy=ref(false),error=ref(''),searched=ref(false)
 const local=computed(()=>places.filter(p=>!p.id.startsWith('osm:')&&(!query.value||p.name.includes(query.value)||p.kind.includes(query.value))))
 let sequence=0
-async function search(){if(busy.value||query.value.trim().length<2)return;const version=++sequence;const q=query.value.trim();busy.value=true;error.value='';searched.value=true;results.value=[];try{const data=await api('/places/search?q='+encodeURIComponent(q));if(version!==sequence||q!==query.value.trim())return;registerPlaces(data.places);results.value=data.places}catch(e){if(version===sequence)error.value=(e as Error).message}finally{if(version===sequence)busy.value=false}}
+async function search(){if(busy.value||query.value.trim().length<2)return;const version=++sequence;const q=query.value.trim();busy.value=true;error.value='';searched.value=true;results.value=[];try{const data=await api('/places/search?q='+encodeURIComponent(normalizePlaceQuery(q)));if(version!==sequence||q!==query.value.trim())return;registerPlaces(data.places);results.value=data.places}catch(e){if(version===sequence)error.value=(e as Error).message}finally{if(version===sequence)busy.value=false}}
 function change(){sequence++;busy.value=false;searched.value=false;results.value=[];error.value=''}
 </script>
 <template>
