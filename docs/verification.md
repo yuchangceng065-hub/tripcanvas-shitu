@@ -257,3 +257,11 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 前端新增 `AgentTrace.vue`：启动运行、解析 SSE、逐条展示模型动作/工具调用/结果，完成后展示指标与“确认并保存 Agent 方案”；向导里可通过“用 Agent 规划（实验）”打开。
 - 测试：后端 127 项、前端 84 项（含 AgentTrace 组件与 SSE 解析）、Ruff、构建通过。
 - 未做：真实浏览器点选轨迹面板（jsdom 组件测试通过）；P2 的地点搜索/消歧。
+
+### 2026-11-05：Agent P1 线上流式验收
+
+- 部署提交 `74601c9` 后，用 QA 账号调用真实 Groq：`POST /planner/agent` 0.93 秒返回 `{runId,status:running}`。
+- `GET /runs/{id}/events` 逐步收到：model(2.26s) → tool_call/tool_result(3.78s) → model(4.78s) → tool_result(4.78s) → model(6.63s) → completed(6.63s)。
+- 结果：3 步、2,099 token、museum+quyuan 一日方案，仅 `meal_break` 警告；未确认前无旅行写入。
+- 前端轨迹面板用 jsdom 组件测试覆盖（启动、流式事件、确认保存）；Sites 尚未重新发布，线上页面还没有这个入口。
+- CI 41908524041、Postgres 41908532530 均通过。
