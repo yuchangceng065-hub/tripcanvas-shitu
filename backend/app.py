@@ -48,7 +48,7 @@ ORIGINS=os.getenv('FRONTEND_ORIGINS','http://127.0.0.1:5173,http://localhost:517
 ORIGINS=[origin.strip().rstrip('/') for origin in ORIGINS if origin.strip()]
 COMMIT=(os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_COMMIT') or '').strip()
 if not logging.getLogger().handlers:logging.basicConfig(level=os.getenv('LOG_LEVEL','INFO'),format='%(asctime)s %(levelname)s %(name)s %(message)s')
-app.add_middleware(CORSMiddleware,allow_origins=ORIGINS,allow_credentials=True,allow_methods=['GET','POST','PUT','PATCH','DELETE'],allow_headers=['Content-Type','Idempotency-Key','Authorization'])
+app.add_middleware(CORSMiddleware,allow_origins=ORIGINS,allow_credentials=True,allow_methods=['GET','POST','PUT','PATCH','DELETE'],allow_headers=['Content-Type','Idempotency-Key','Authorization','Last-Event-ID'])
 @app.middleware('http')
 async def origin_check(request,call_next):
     if request.method not in ('GET','HEAD','OPTIONS'):

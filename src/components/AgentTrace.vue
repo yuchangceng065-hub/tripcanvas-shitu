@@ -1,57 +1,120 @@
 <script setup lang="ts">
-import {ref,onMounted,onUnmounted} from 'vue'
+import {ref,computed,watch,onMounted,onUnmounted} from 'vue'
 import {LoaderCircle,Check,AlertTriangle,Sparkles} from '@lucide/vue'
-import {api,startAgent,streamRun,confirmTrip,type AgentEvent} from '../api'
-import {durationLabel} from '../planningOptions'
-import type {Requirements,Trip} from '../domain'
+import {startAgent,watchRun,confirmTrip,type AgentEvent} from '../api'
+import {durationLabel,type PlanMetrics} from '../planningOptions'
+import {placeById,registerPlaces,time,type Requirements,type Trip} from '../domain'
 const props=defineProps<{title:string;requirements:Requirements;candidateIds:string[];optionalIds?:string[];loggedIn:boolean}>()
 const emit=defineEmits<{created:[trip:Trip]}>()
-const events=ref<AgentEvent[]>([]),status=ref('connecting'),error=ref(''),busy=ref(false),plan=ref<{trip:Trip;issues:{severity:string;message:string}[];metrics:Record<string,number|null>;summary:string}|null>(null)
-const controller=new AbortController()
+interface PreviewRow {activityId:string;placeId:string;start:number;end:number;travelMinutes:number;waitingMinutes:number;duration:number;lock:string;fixedStart:number|null}
+interface AgentPlan {trip:Trip;issues:{severity:string;message:string}[];metrics:PlanMetrics;summary:string;timeline:{date:string;start:number;end:number;activities:PreviewRow[]}[];includedIds:string[];omittedIds:string[];routeSources:string[]}
+const events=ref<AgentEvent[]>([]),status=ref('connecting'),error=ref(''),busy=ref(false),plan=ref<AgentPlan|null>(null),runId=ref('')
+let controller:AbortController|undefined
+const pendingKey='tripcanvas.agent.pending.v1'
+const signature=computed(()=>JSON.stringify([props.title,props.requirements,props.candidateIds,props.optionalIds??[]]))
+const hardErrors=computed(()=>plan.value?.issues.some(issue=>issue.severity==='error')??false)
+const statusLabels:Record<string,string>={connecting:'准备连接',running:'运行中…',completed:'已完成',failed:'运行失败',needs_input:'需要补充',gave_up:'未找到方案',incomplete:'尚未完成',interrupted:'运行已中断',stale:'需求已修改',disconnected:'连接已中断'}
+const tools:Record<string,string>={route_day:'查询道路',validate_plan:'核验安排',compare_plans:'比较方案',propose_plan:'整理最终方案',need_input:'请求补充',give_up:'说明不可行原因'}
+const name=(id:string)=>placeById(id)?.name??id
 function label(event:AgentEvent){
- if(event.phase==='model')return `第 ${event.detail.step??'?'} 步 · 选择 ${event.detail.action??'动作'}`
- if(event.phase==='tool_call')return `调用 ${event.detail.tool}${event.detail.step?'（第 '+event.detail.step+' 步）':''}`
- if(event.phase==='tool_result')return event.detail.ok===false?'工具返回错误':'工具返回结果'
- if(event.phase==='completed')return '完成'
- if(event.phase==='failed')return '失败'
- if(event.phase==='needs_input')return '需要你确认'
- return event.phase
+ if(event.phase==='model')return `第 ${event.detail.step??'?'} 步 · ${tools[String(event.detail.action)]??'选择下一步'}`
+ if(event.phase==='tool_call')return `正在${tools[String(event.detail.tool)]??'检查方案'}`
+ if(event.phase==='tool_result')return event.status==='error'||event.detail.ok===false?'本次检查未通过，继续调整':'已取得检查结果'
+ return statusLabels[event.phase]??(event.phase==='model_error'?'模型输出需要重试':'处理行程')
 }
-async function start(){
- if(!props.loggedIn){error.value='请先登录再使用 Agent';status.value='failed';return}
- busy.value=true;error.value='';events.value=[];plan.value=null;status.value='running'
+function summary(event:AgentEvent){
+ if(typeof event.detail.error==='string')return event.detail.error
+ if(event.detail.truncated)return '记录较长，已显示摘要。'
+ const value=event.detail.summary as {feasible?:boolean;minutes?:number}|undefined
+ if(value?.feasible!==undefined)return value.feasible?'道路与时间条件通过检查':'方案仍有冲突'
+ if(typeof value?.minutes==='number')return `道路转场 ${durationLabel(value.minutes)}`
+ return ''
+}
+function clearPending(){try{const value=JSON.parse(sessionStorage.getItem(pendingKey)||'null');if(value?.runId===runId.value)sessionStorage.removeItem(pendingKey)}catch{}}
+function previewComplete(value:AgentPlan){
+ return value?.trip&&Array.isArray(value.timeline)&&value.timeline.length===value.trip.days.length&&value.timeline.every((day,i)=>
+  day.date===value.trip.days[i]?.date&&day.activities.length===value.trip.days[i]?.activities.length&&day.activities.every((row,j)=>
+   row.activityId===value.trip.days[i]?.activities[j]?.id&&row.placeId===value.trip.days[i]?.activities[j]?.placeId&&Number.isFinite(row.start)&&Number.isFinite(row.end)&&row.end>=row.start))
+}
+async function observe(){
+ controller?.abort();const active=new AbortController();controller=active;busy.value=true;error.value='';status.value='running'
  try{
-  const started=await startAgent({title:props.title,requirements:props.requirements,candidateIds:props.candidateIds,optionalIds:props.optionalIds??[],useModel:false})
-  await streamRun(started.runId,event=>events.value.push(event),controller.signal)
-  const run=await api('/runs/'+started.runId)
+  const run=await watchRun(runId.value,event=>{if(!active.signal.aborted)events.value.push(event)},active.signal,events.value.at(-1)?.seq??0)
+  if(active.signal.aborted)return
   status.value=String(run.status??'unknown')
-  if(run.status==='completed'&&run.validation)plan.value=run.validation
+  if(run.status==='completed'){
+   const result=run.validation as AgentPlan
+   if(!previewComplete(result))throw new Error('本次结果缺少完整逐站预览，请重新运行后再保存。')
+   registerPlaces(result.trip.placeSnapshots);plan.value=result
+  }
   if(run.status==='failed')error.value=String(run.error??'运行失败')
   if(run.status==='needs_input')error.value=String(run.question??'需要补充信息')
-  if(run.status==='gave_up'||run.status==='incomplete')error.value=String(run.message??'未完成')
- }catch(e){if(!controller.signal.aborted){status.value='failed';error.value=(e as Error).message}}
- finally{busy.value=false}
+  if(['gave_up','incomplete','interrupted'].includes(run.status))error.value=String(run.message??run.error??'本次运行已结束，请调整需求后重试。')
+  clearPending()
+ }catch(e){if(!active.signal.aborted){status.value='disconnected';error.value=(e as Error).message}}
+ finally{if(!active.signal.aborted)busy.value=false}
+}
+async function start(){
+ if(busy.value)return
+ if(!props.loggedIn){error.value='请先登录再使用 Agent';status.value='failed';return}
+ if(props.candidateIds.length<props.requirements.days){error.value='请先确认足够的候选地点';status.value='failed';return}
+ busy.value=true;error.value='';events.value=[];plan.value=null;status.value='running';runId.value=''
+ const active=new AbortController();controller=active
+ try{
+  const started=await startAgent({title:props.title,requirements:props.requirements,candidateIds:props.candidateIds,optionalIds:props.optionalIds??[],useModel:false},active.signal)
+  if(active.signal.aborted)return
+  runId.value=started.runId
+  try{sessionStorage.setItem(pendingKey,JSON.stringify({runId:runId.value,signature:signature.value}))}catch{}
+  await observe()
+ }catch(e){if(!active.signal.aborted){status.value='failed';error.value=(e as Error).message;busy.value=false}}
 }
 async function save(){
- if(!plan.value||busy.value)return
+ if(!plan.value||busy.value||hardErrors.value)return
  busy.value=true;error.value=''
  try{const result=await confirmTrip(plan.value.trip,0);emit('created',result.trip)}
  catch(e){error.value=(e as Error).message}
  finally{busy.value=false}
 }
-onMounted(start);onUnmounted(()=>controller.abort())
+watch(signature,()=>{controller?.abort();busy.value=false;status.value='stale';error.value='需求或候选已修改，请重新运行以核验新安排。';plan.value=null;runId.value='';events.value=[]})
+onMounted(()=>{
+ try{const pending=JSON.parse(sessionStorage.getItem(pendingKey)||'null');if(props.loggedIn&&pending?.signature===signature.value&&typeof pending.runId==='string'){runId.value=pending.runId;void observe();return}}catch{}
+ void start()
+})
+onUnmounted(()=>controller?.abort())
 </script>
 <template>
  <section class="agent-trace" aria-label="Agent 运行轨迹">
-  <header><span class="agent-title"><Sparkles :size="15"/>Agent 运行轨迹</span><small>{{status==='running'?'运行中…':status}}</small></header>
-  <p v-if="busy&&!events.length" class="form-hint"><LoaderCircle :size="13" class="spin"/>正在启动模型与工具…</p>
-  <ol class="agent-steps"><li v-for="event in events" :key="event.seq" :class="event.status"><span>{{label(event)}}</span><small v-if="event.phase==='tool_result'&&event.detail.summary">{{JSON.stringify(event.detail.summary).slice(0,120)}}</small></li></ol>
+  <header><span class="agent-title"><Sparkles :size="15"/>Agent 运行轨迹</span><small role="status">{{statusLabels[status]??status}}</small></header>
+  <p v-if="busy&&!events.length" class="form-hint"><LoaderCircle :size="13" class="spin"/>正在连接本次运行，断线后会继续获取结果…</p>
+  <ol class="agent-steps"><li v-for="event in events" :key="event.seq" :class="event.status"><span>{{label(event)}}</span><small v-if="summary(event)">{{summary(event)}}</small></li></ol>
   <p v-if="error" class="form-error" role="alert"><AlertTriangle :size="13"/>{{error}}</p>
-  <div v-if="plan" class="agent-plan">
+  <button v-if="status==='disconnected'&&runId" class="button quiet" @click="observe" :disabled="busy">继续查看本次运行</button>
+  <div v-if="plan" class="agent-plan" aria-label="Agent 方案完整预览">
+   <h3>{{plan.trip.title}}</h3>
+   <p class="form-hint">{{plan.trip.people}} 人 · {{plan.trip.mode==='walk'?'步行':'自驾与步行接驳'}} · {{plan.trip.days.length}} 天</p>
    <p class="form-hint">{{plan.summary}}</p>
-   <p class="form-hint">步行 {{plan.metrics.walkingKm===null?'未能拆分':plan.metrics.walkingKm+' km'}} · 交通 {{durationLabel(Number(plan.metrics.travelMinutes??0))}} · 游览 {{durationLabel(Number(plan.metrics.visitMinutes??0))}}</p>
-   <p v-for="issue in plan.issues" :key="issue.message" class="form-hint">{{issue.severity==='warning'?'提醒':'冲突'}}：{{issue.message}}</p>
-   <button class="button primary" @click="save" :disabled="busy"><Check :size="15"/>确认并保存 Agent 方案</button>
+   <dl class="agent-metrics">
+    <div><dt>转场步行</dt><dd>{{plan.metrics.walkingKm===null?'未能拆分':plan.metrics.walkingKm.toFixed(1)+' km'}}</dd></div>
+    <div><dt>交通与接驳</dt><dd>{{durationLabel(plan.metrics.travelMinutes)}}</dd></div>
+    <div><dt>游览停留</dt><dd>{{durationLabel(plan.metrics.visitMinutes)}}</dd></div>
+    <div><dt>可支配空余</dt><dd>{{durationLabel(plan.metrics.freeMinutes)}}</dd></div>
+   </dl>
+   <p class="form-hint">道路来源：{{plan.routeSources.map(source=>source==='amap'?'高德':source==='osrm'?'OSRM':source).join('、')||'单地点无需转场'}}。空余尚未安排用餐；景区内部步行、营业与预约仍需确认。</p>
+   <section v-for="(day,di) in plan.timeline" :key="day.date" class="agent-day" :aria-label="`Day ${di+1} 逐站安排`">
+    <h4>Day {{di+1}} · {{day.date}} <small>{{time(day.start)}}—{{time(day.end)}}</small></h4>
+    <ol>
+     <li v-for="(row,index) in day.activities" :key="row.activityId">
+      <span class="agent-stop-index">{{index+1}}</span>
+      <div><strong>{{name(row.placeId)}}</strong><small>{{row.duration}} 分钟{{row.lock==='fixed'?' · 固定 '+time(row.fixedStart!):row.lock==='keep'?' · 必须保留':' · 可选地点'}}<template v-if="index"> · 转场 {{durationLabel(row.travelMinutes)}}</template><template v-if="row.waitingMinutes"> · 等待 {{durationLabel(row.waitingMinutes)}}</template></small></div>
+      <span class="agent-stop-time">{{time(row.start)}}—{{time(row.end)}}</span>
+     </li>
+    </ol>
+    <p class="form-hint">当天转场步行 {{plan.metrics.days[di]?.walkingKm==null?'未知':plan.metrics.days[di]!.walkingKm!.toFixed(1)+' km'}} · 可支配空余 {{durationLabel(plan.metrics.days[di]?.freeMinutes??0)}}</p>
+   </section>
+   <p class="agent-tradeoff"><strong>地点取舍：</strong>{{plan.omittedIds.length?'舍弃可选地点：'+plan.omittedIds.map(name).join('、'):'保留全部候选地点'}}</p>
+   <p v-for="issue in plan.issues" :key="issue.message" :class="issue.severity==='error'?'form-error':'form-hint'">{{issue.severity==='warning'?'提醒':'冲突'}}：{{issue.message}}</p>
+   <p class="form-hint">确认后将重新核验道路与时间，再保存这份安排。</p>
+   <button class="button primary" @click="save" :disabled="busy||hardErrors"><Check :size="15"/>确认并保存 Agent 方案</button>
   </div>
   <button class="text-button" @click="start" :disabled="busy">重新运行</button>
  </section>

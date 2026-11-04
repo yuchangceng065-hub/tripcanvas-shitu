@@ -3,10 +3,48 @@ from __future__ import annotations
 import json
 import time
 import uuid
+import math
 
 from sqlalchemy import select, update
 
 from backend.db import Run, RunEvent, SessionLocal
+
+
+def encode_detail(value: dict, limit: int = 4000) -> str:
+    """Bound fields before JSON encoding, so every stored summary stays readable."""
+    for width, length, depth in ((24, 1600, 7), (10, 240, 5), (5, 100, 4), (3, 60, 3)):
+        truncated = False
+        def trim(item, level=0):
+            nonlocal truncated
+            if isinstance(item, str):
+                if len(item) > length:truncated = True
+                return item[:length]
+            if item is None or isinstance(item, (bool, int)):return item
+            if isinstance(item, float):return item if math.isfinite(item) else None
+            if level >= depth:
+                truncated = True;return '…'
+            if isinstance(item, dict):
+                if len(item) > width:truncated = True
+                return {str(k)[:80]: trim(v, level + 1) for k, v in list(item.items())[:width]}
+            if isinstance(item, (list, tuple)):
+                if len(item) > width:truncated = True
+                return [trim(v, level + 1) for v in item[:width]]
+            truncated = True;return str(item)[:length]
+        bounded = trim(value)
+        if not isinstance(bounded, dict):bounded = {'summary': bounded}
+        if truncated:bounded['truncated'] = True
+        encoded = json.dumps(bounded, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+        if len(encoded) <= limit:return encoded
+    return json.dumps({'truncated': True, 'message': '事件摘要较长，部分字段已省略'}, ensure_ascii=False)
+
+
+def decode_detail(raw: str) -> dict:
+    """Older releases may have saved a sliced JSON document."""
+    try:
+        value = json.loads(raw)
+        if isinstance(value, dict):return value
+    except (ValueError, TypeError):pass
+    return {'truncated': True, 'message': '历史事件摘要不完整，已跳过'}
 
 
 class RunRecorder:
@@ -22,7 +60,7 @@ class RunRecorder:
         self.seq += 1
         with SessionLocal.begin() as session:
             session.add(RunEvent(id=str(uuid.uuid4()), run_id=self.id, seq=self.seq, phase=phase, status=status,
-                                 detail=json.dumps(detail or {}, ensure_ascii=False)[:4000], created=time.time()))
+                                 detail=encode_detail(detail or {}), created=time.time()))
         return self.seq
 
     def finish(self, status: str, payload: dict | None = None) -> None:
@@ -55,5 +93,5 @@ def run_payload(run: Run, events: list[RunEvent]) -> dict:
     payload = json.loads(run.result)
     payload['runId'] = run.id
     payload['events'] = [{'seq': event.seq, 'phase': event.phase, 'status': event.status,
-                          'detail': json.loads(event.detail)} for event in events]
+                          'detail': decode_detail(event.detail)} for event in events]
     return payload

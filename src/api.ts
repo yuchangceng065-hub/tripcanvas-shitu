@@ -57,34 +57,76 @@ export function confirmTrip(trip:Trip,baseRevision:number):Promise<Confirmed>{re
 
 export interface AgentEvent {seq:number;phase:string;status:string;detail:Record<string,unknown>}
 export interface AgentStart {runId:string;status:string}
-export function startAgent(body:unknown):Promise<AgentStart>{return api('/planner/agent','POST',body)}
+export function startAgent(body:unknown,signal?:AbortSignal):Promise<AgentStart>{return api('/planner/agent','POST',body,signal)}
 export function parseSSEBlock(block:string):AgentEvent|null{
- const lines=block.split(/\r?\n/);let seq=0,phase='',data=''
+ const lines=block.split(/\r?\n/);let seq=0,phase='';const data:string[]=[]
  for(const line of lines){
   if(line.startsWith('id:'))seq=Number(line.slice(3).trim())
   else if(line.startsWith('event:'))phase=line.slice(6).trim()
-  else if(line.startsWith('data:'))data+=line.slice(5).trim()
+  else if(line.startsWith('data:'))data.push(line.slice(5).trimStart())
  }
  if(!phase)return null
- let detail:Record<string,unknown>={}
- try{detail=JSON.parse(data||'{}')}catch{}
- return {seq,phase,status:String(detail.status??'ok'),detail}
+ if(!Number.isSafeInteger(seq)||seq<1)throw new Error('运行事件序号无效，请重新连接')
+ const value=JSON.parse(data.join('\n')||'{}')
+ if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('运行事件格式无效')
+ // Read the new status/detail envelope and older flat events.
+ const detail=value.detail&&typeof value.detail==='object'&&!Array.isArray(value.detail)?value.detail:value
+ return {seq,phase,status:String(value.status??'ok'),detail}
 }
 export async function streamRun(runId:string,onEvent:(event:AgentEvent)=>void,signal?:AbortSignal,cursor=0):Promise<void>{
  const headers:Record<string,string>={}
  if(token)headers.Authorization='Bearer '+token
  if(cursor)headers['Last-Event-ID']=String(cursor)
- const response=await fetch(base+'/runs/'+runId+'/events',{headers,credentials:'include',signal})
- if(!response.ok||!response.body)throw new Error('无法读取运行轨迹')
+ const timeout=AbortSignal.timeout(100000)
+ const response=await fetch(base+'/runs/'+encodeURIComponent(runId)+'/events',{headers,credentials:'include',signal:signal?AbortSignal.any([signal,timeout]):timeout})
+ if(!response.ok||!response.body)throw new ApiError(response.status,'无法读取运行轨迹')
  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer=''
- while(true){
-  const {done,value}=await reader.read();if(done)break
-  buffer+=decoder.decode(value,{stream:true})
-  let index
-  while((index=buffer.indexOf('\n\n'))>=0){
-   const event=parseSSEBlock(buffer.slice(0,index));buffer=buffer.slice(index+2)
-   if(event)onEvent(event)
+ try{
+  while(true){
+   const {done,value}=await reader.read();if(done)break
+   buffer+=decoder.decode(value,{stream:true})
+   let separator:RegExpMatchArray|null
+   while((separator=buffer.match(/\r?\n\r?\n/))){
+    const index=separator.index!;const event=parseSSEBlock(buffer.slice(0,index));buffer=buffer.slice(index+separator[0].length)
+    if(event)onEvent(event)
+   }
   }
+  buffer+=decoder.decode()
+  const tail=parseSSEBlock(buffer);if(tail)onEvent(tail)
+ }finally{await reader.cancel().catch(()=>{});reader.releaseLock()}
+}
+export interface AgentRun {status:string;events?:AgentEvent[];validation?:unknown;error?:string;question?:string;message?:string}
+async function runPause(ms:number,signal?:AbortSignal){
+ signal?.throwIfAborted()
+ await new Promise<void>((resolve,reject)=>{
+  const done=()=>{signal?.removeEventListener('abort',cancel);resolve()}
+  const timer=setTimeout(done,ms)
+  const cancel=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancel);reject(signal?.reason??new Error('已停止查看'))}
+  signal?.addEventListener('abort',cancel,{once:true})
+ })
+}
+/** Reconnect the same run, replay missed events and poll the authoritative result. */
+export async function watchRun(runId:string,onEvent:(event:AgentEvent)=>void,signal?:AbortSignal,cursor=0):Promise<AgentRun>{
+ let last=cursor,unavailable=0;const deadline=Date.now()+360000
+ const receive=(event:AgentEvent)=>{if(Number.isSafeInteger(event.seq)&&event.seq>last){last=event.seq;onEvent(event)}}
+ while(Date.now()<deadline){
+  signal?.throwIfAborted()
+  try{await streamRun(runId,receive,signal,last)}
+  catch(e){
+   signal?.throwIfAborted()
+   if(e instanceof ApiError&&[401,403,404].includes(e.status))throw e
+  }
+  try{
+   const run:AgentRun=await api('/runs/'+encodeURIComponent(runId),'GET',undefined,signal)
+   for(const event of run.events??[])receive(event)
+   unavailable=0
+   if(run.status!=='running')return run
+  }catch(e){
+   signal?.throwIfAborted()
+   if(e instanceof ApiError&&[401,403,404].includes(e.status))throw e
+   if(++unavailable>=3)throw new Error('暂时无法取得运行结果，请继续查看本次运行；无需重新生成。')
+  }
+  await runPause(Math.min(1000*2**unavailable,5000),signal)
  }
- const tail=parseSSEBlock(buffer);if(tail)onEvent(tail)
+ throw new Error('等待运行结果超时，可继续查看本次运行。')
 }

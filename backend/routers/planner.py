@@ -2,7 +2,7 @@ import asyncio,json,os,time,uuid
 from fastapi import APIRouter,Depends,HTTPException,Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from backend.agent import run_agent
+from backend.agent import run_agent,validate_agent_request
 from backend.alternatives import PlanSearch
 from backend.places import PLACES,POIS
 from backend.planning import AlternativesBody,DraftBody,evaluate,make_trip
@@ -12,7 +12,7 @@ from backend.app import (amap_enabled,current_user,db,draft_order,locked_violati
     snapshot,throttle,verify_proposal)
 from backend.db import Run,SessionLocal,TripRow,User
 from backend.model_metrics import current_metrics,empty_metrics
-from backend.runlog import RunRecorder,events_for,run_payload
+from backend.runlog import RunRecorder,events_for,run_payload,decode_detail
 from backend.schemas import ConfirmBody,DayEdit,ModelResult,RequestBody,SuggestionBody,Trip,TripBody
 router=APIRouter()
 
@@ -122,6 +122,7 @@ async def alternatives(data:AlternativesBody,request:Request,user:User=Depends(c
 async def agent_plan(data:AlternativesBody,request:Request,user:User=Depends(current_user)):
     """Start a bounded tool-calling run; progress streams from /runs/{id}/events."""
     throttle('agent:'+user.id,2)
+    validate_agent_request(data)
     if request.app.state.alternatives_lock.locked():raise HTTPException(429,'正在核验其他方案，请稍后重试')
     reserve_user_daily(user.id,'agent',int(os.getenv('PLAN_AGENT_DAILY_LIMIT','6')))
     if len(data.candidateIds)>data.requirements.days*8:raise HTTPException(422,'候选过多，请减少地点或增加旅行天数')
@@ -133,7 +134,9 @@ async def agent_plan(data:AlternativesBody,request:Request,user:User=Depends(cur
         token=current_metrics.set(metrics)
         try:
             async with state.alternatives_lock:
-                await run_agent(data,state.router,recorder)
+                await asyncio.wait_for(run_agent(data,state.router,recorder),timeout=240)
+        except TimeoutError:
+            recorder.fail('规划超过四分钟，已停止；请减少候选地点后重试。')
         except HTTPException as error:
             recorder.fail(error.detail)
         except Exception as error:
@@ -205,17 +208,22 @@ async def run_events(id:str,request:Request,user:User=Depends(current_user),s:Se
     if not r or r.owner!=user.id:raise HTTPException(404,'运行不存在')
     try:cursor=int(request.headers.get('last-event-id','0') or 0)
     except ValueError:cursor=0
+    s.close()  # Do not hold a pooled DB connection for the whole event stream.
     async def stream():
-        last=max(0,cursor);deadline=time.time()+90
-        while time.time()<deadline:
+        last=max(0,cursor);deadline=time.monotonic()+90;heartbeat=time.monotonic()
+        while time.monotonic()<deadline:
+            if await request.is_disconnected():break
             events=events_for(id,last)
             for event in events:
                 last=event.seq
-                yield f'id: {event.seq}\nevent: {event.phase}\ndata: {event.detail}\n\n'
+                payload=json.dumps({'status':event.status,'detail':decode_detail(event.detail)},ensure_ascii=False)
+                yield f'id: {event.seq}\nevent: {event.phase}\ndata: {payload}\n\n'
             if not events:
                 with SessionLocal() as session:
                     current=session.get(Run,id)
                     status=json.loads(current.result).get('status') if current else None
                 if status not in ('running',None):break
+            if time.monotonic()-heartbeat>=10:
+                yield ': keep-alive\n\n';heartbeat=time.monotonic()
             await asyncio.sleep(.25)
-    return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache'})
+    return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})

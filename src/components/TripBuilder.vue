@@ -247,8 +247,8 @@ async function save(){
     <p class="form-hint">按兴趣补充的候选（可跳过）：</p>
     <div class="suggestion-list"><button v-for="p in parsed.suggestions" :key="p.id" :disabled="candidateIds.includes(p.id)" @click="choose(p)">{{candidateIds.includes(p.id)?'已选':'+ '}}{{p.name}}</button></div>
    </template>
-   <div class="agent-entry"><button type="button" class="button quiet small" @click="agentOpen=!agentOpen">{{agentOpen?'收起 Agent 实验':'用 Agent 规划（实验）'}}</button><span class="form-hint">模型多步调用路线/校验工具；方案仍需确认才保存。</span></div>
-   <AgentTrace v-if="agentOpen" :title="title" :requirements="req" :candidate-ids="candidateIds" :optional-ids="[]" :logged-in="loggedIn" @created="t=>emit('created',t)"/>
+   <div class="agent-entry"><button type="button" class="button quiet small" @click="agentOpen=!agentOpen" :disabled="!agentOpen&&(!loggedIn||!hasModel||candidateIds.length<req.days||busy)">{{agentOpen?'收起 Agent 实验':'用 Agent 规划（实验）'}}</button><span class="form-hint">模型多步调用路线/校验工具；方案仍需确认才保存。</span></div>
+   <AgentTrace v-if="agentOpen" :title="title" :requirements="req" :candidate-ids="candidateIds" :optional-ids="optionalIds" :logged-in="loggedIn" @created="t=>emit('created',t)"/>
    <label class="model-choice"><input type="checkbox" v-model="useModel" :disabled="!hasModel"/>{{hasModel?'使用模型分配日期和顺序':'当前为规则规划，将使用地理邻近草案'}}</label>
    <p class="form-hint">{{useModel?'将把确认的需求和候选地点发给模型，随后程序核验地点和道路用时。':'规则草案使用确认的地点和道路估时，不代表 AI 生成，也不保证全局最优。'}}</p>
    <p v-if="error" class="form-error" role="alert">{{error}}</p>

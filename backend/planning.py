@@ -107,7 +107,7 @@ def evaluate(trip,routes,pois):
                     'message':f'必去地点 {pois.get(id,{}).get("name",id)} 必须保留且仅安排一次','options':[]})
     if requirements and requirements.returnBy is not None:
         final=trip.days[-1]
-        destination=next((a for a in final.activities if a.placeId==requirements.destinationPlaceId),None)
+        destination=next((a for a in reversed(final.activities) if a.placeId==requirements.destinationPlaceId),None)
         if destination is None:
             issues.append({'code':'return_missing','severity':'error','day':len(trip.days)-1,'activityId':None,
                 'message':'末日缺少要求的返程地点，请加入并核验到达时间','options':[]})
@@ -162,7 +162,7 @@ def evaluate(trip,routes,pois):
             issues.append({'code':'meal_break','severity':'warning','day':index,'activityId':None,
                 'message':f'第 {index+1} 天 11:30—13:30 没有 40 分钟以上空档，用餐和休息可能被压缩','options':[]})
         if index==len(trip.days)-1 and requirements and requirements.returnBy is not None and day.activities:
-            last=next((a for a in day.activities if a.placeId==requirements.destinationPlaceId),None)
+            last=next((a for a in reversed(day.activities) if a.placeId==requirements.destinationPlaceId),None)
             if last is None:continue
             last_start=_activity_start(day,legs,last)
             if last_start>requirements.returnBy:

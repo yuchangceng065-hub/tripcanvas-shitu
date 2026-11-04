@@ -2,7 +2,7 @@ import time
 import uuid
 import pytest
 from fastapi.testclient import TestClient
-from backend.app import app
+from backend.app import app,attempts
 
 
 def register(client):
@@ -22,6 +22,7 @@ def fast_roads(request):
 
 @pytest.fixture
 def client(monkeypatch):
+    attempts.clear()
     monkeypatch.setenv('PLAN_AGENT_DAILY_LIMIT','50')
     monkeypatch.setenv('PLANNER_MODE','auto')
     monkeypatch.setenv('MODEL_BASE_URL','https://example.invalid/v1')
@@ -100,3 +101,88 @@ def test_agent_requires_a_model(client,monkeypatch):
     monkeypatch.setenv('PLANNER_MODE','rules')
     response=client.post('/api/v1/planner/agent',json=body())
     assert response.status_code==503 and 'Agent' in response.json()['detail']
+
+
+@pytest.mark.parametrize('days,optional',[
+    ([['museum','quyuan','silk']], []),
+    ([['museum','quyuan','quyuan']], ['quyuan']),
+    ([['museum','quyuan'],['quyuan']], ['quyuan']),
+    ([['museum']], []),
+])
+def test_agent_rejects_unconfirmed_duplicate_and_missing_candidates(days,optional):
+    import asyncio
+    from backend.agent import Toolbox
+    from backend.planning import AlternativesBody
+    class Roads:
+        async def route(self,request):raise AssertionError('Invalid candidates must fail before any provider request')
+    data=body(len(days));data['optionalIds']=optional
+    data=AlternativesBody.model_validate(data)
+    with pytest.raises(ValueError):asyncio.run(Toolbox(data,Roads()).run('propose_plan',{'days':days}))
+
+
+def test_agent_preserves_title_optional_choice_and_verified_timeline(client,monkeypatch):
+    register(client)
+    async def roads(request):return fast_roads(request)
+    monkeypatch.setattr(app.state.router,'route',roads)
+    scripted(monkeypatch,[{'action':'propose_plan','args':{'days':[['museum','quyuan']]}}])
+    data=body();data['candidateIds'].append('silk');data['optionalIds']=['silk']
+    data['requirements'].update(originPlaceId='station',destinationPlaceId='station',returnBy=1050)
+    started=client.post('/api/v1/planner/agent',json=data).json();run=wait_run(client,started['runId'])
+    assert run['status']=='completed',run
+    plan=run['validation'];assert plan['trip']['title']==data['title'] and plan['omittedIds']==['silk']
+    rows=plan['timeline'][0]['activities']
+    assert [r['placeId'] for r in rows]==['station','museum','quyuan','station']
+    assert rows[1]['start']==595 and rows[1]['travelMinutes']==10
+    assert rows[-1]['start']==1050 and rows[-1]['lock']=='fixed'
+    assert plan['metrics']['travelMinutes']==30
+    assert client.get('/api/v1/trips/'+plan['trip']['id']).status_code==404
+
+
+@pytest.mark.parametrize('change', ['unknown','duplicate','anchor-as-visit','not-enough'])
+def test_agent_rejects_invalid_input_before_creating_background_run(client,change):
+    register(client);data=body()
+    if change=='unknown':data['candidateIds']=['not-confirmed']
+    if change=='duplicate':data['candidateIds']=['museum','museum']
+    if change=='anchor-as-visit':data['requirements']['originPlaceId']='museum'
+    if change=='not-enough':data['requirements']['days']=3
+    response=client.post('/api/v1/planner/agent',json=data)
+    assert response.status_code==422
+
+
+def test_run_events_remain_valid_json_after_bounding_and_recover_legacy_data(client):
+    import json
+    from backend.runlog import RunRecorder,events_for
+    from backend.db import SessionLocal,RunEvent
+    register(client)
+    # Use the authenticated owner without retaining any credential in the report.
+    from backend.db import User
+    from sqlalchemy import select
+    username=client.get('/api/v1/auth/me').json()['username']
+    with SessionLocal() as session:owner=session.scalar(select(User).where(User.username==username)).id
+    rec=RunRecorder(owner,'',0,'agent')
+    rec.event('tool_result',status='error',detail={'step':2,'ok':False,'error':'错误说明'*2000,'summary':[{'nested':['x'*600]*15}]*20})
+    rec.finish('failed',{'error':'test'})
+    event=events_for(rec.id)[0];assert len(event.detail)<=4000 and json.loads(event.detail)['truncated']
+    with SessionLocal.begin() as session:session.get(RunEvent,event.id).detail='{"old":"cut'
+    result=client.get('/api/v1/runs/'+rec.id)
+    assert result.status_code==200 and result.json()['events'][0]['detail']['truncated']
+    sse=client.get('/api/v1/runs/'+rec.id+'/events',headers={'Last-Event-ID':'0'})
+    blocks=[b for b in sse.text.split('\n\n') if 'event: tool_result' in b]
+    payload=json.loads(next(line[6:] for line in blocks[0].splitlines() if line.startswith('data: ')))
+    assert payload['status']=='error' and payload['detail']['truncated']
+
+
+def test_event_resume_preflight_allows_last_event_id(client):
+    response=client.options('/api/v1/runs/example/events',headers={'Origin':'http://127.0.0.1:5173','Access-Control-Request-Method':'GET','Access-Control-Request-Headers':'authorization,last-event-id'})
+    assert response.status_code==200
+
+
+def test_round_trip_return_deadline_checks_last_occurrence():
+    import asyncio
+    from backend.agent import Toolbox
+    from backend.planning import AlternativesBody
+    class SlowRoads:
+        async def route(self,request):return {'source':'osrm','legs':[{'minutes':90,'distance':6} for _ in request.placeIds[1:]]}
+    data=body();data['requirements'].update(originPlaceId='station',destinationPlaceId='station',returnBy=800)
+    result=asyncio.run(Toolbox(AlternativesBody.model_validate(data),SlowRoads()).run('propose_plan',{'days':[['museum','quyuan']]}))
+    assert not result['ok'] and any(i['code']=='return_deadline' for i in result['issues'])

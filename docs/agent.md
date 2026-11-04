@@ -1,48 +1,38 @@
-# 有界工具调用 Agent（P0）
+# 有界工具调用 Agent
 
-P1：后台运行 + 实时事件流 + 前端“运行轨迹”面板。仍只覆盖“候选已确认 → 方案”，不做自由对话。
+仅覆盖已确认的杭州候选 → 方案。地点搜索和消歧由新建向导完成，Agent 不能擅自扩大游览候选集合。
 
-## 接口
+## 接口与状态
 
-```http
-POST /api/v1/planner/agent
-Authorization: Bearer <token>
-{
-  "title": "我的杭州旅行",
-  "requirements": { "...": "与 /planner/alternatives 相同" },
-  "candidateIds": ["museum", "quyuan"],
-  "optionalIds": []
-}
-```
+`POST /api/v1/planner/agent` 接收与 alternatives 相同的 title、requirements、candidateIds、optionalIds，立即返回 `{runId,status:"running"}`。请求进入后台前检查地点是否存在、候选是否重复、起终点是否混入游览候选、候选是否足够分日。
 
-返回：
+`GET /runs/{runId}` 返回实际运行状态、持久化事件、模型用量及完成后的 `validation`。终态包括 completed、needs_input、gave_up、incomplete、failed、interrupted。方案不自动保存，仍需 `/planner/confirm`。
 
-- `status=completed`：`runId`、`plan.trip`、`plan.issues`、`plan.metrics`、`plan.summary`、`steps`、`modelUsage`
-- `status=needs_input`：`question`
-- `status=gave_up`：`message`
-- `status=incomplete`：超过步数上限，`message`
+## 服务端边界
 
-方案不会自动保存；仍需 `POST /planner/confirm`。
+- 默认最多 6 次模型决策；整个 Agent 执行超过 240 秒会停止并写入 failed。
+- 白名单动作：route_day、validate_plan、compare_plans、propose_plan、need_input、give_up。
+- 游览工具参数必须属于本次候选集合；道路查询可额外使用明确的起终点。已入库但未选中的地点同样拒绝。
+- 所有游览候选全程最多一次，必去全保留；只有 optionalIds 可被舍弃。起终点由程序注入，允许同站出发与返程。
+- 最终方案经真实道路与 evaluate 核验，保存时再次核验；保留用户输入的旅行标题。
+- 每用户每日默认 6 次，每分钟 2 次，与多方案共享进程内运行锁。进程重启标记 interrupted，不承诺跨进程恢复计算。
 
-## 循环
+## 实时轨迹与恢复
 
-- 最多 `PLAN_AGENT_STEPS`（默认 6）步；每步模型只输出一个动作 JSON。
-- 动作：`route_day`、`validate_plan`、`compare_plans`、`propose_plan`、`need_input`、`give_up`。
-- 工具在服务端执行，白名单动作；地点必须是已确认候选，未知 id 直接拒绝。
-- `propose_plan` 通过 `evaluate` 后才算完成；有硬冲突会作为 observation 返回，模型继续调整。
-- 每用户每日次数 `PLAN_AGENT_DAILY_LIMIT`（默认 6），每分钟 2 次；与多方案共用进程内锁。
-- 模型不可用/规则模式返回 503，规则草案仍可使用。
+`GET /runs/{id}/events` 每个连接最多 90 秒，每 10 秒发送注释心跳；Last-Event-ID 支持续传，CORS 允许该请求头。SSE 的 data 为 `{status,detail}`，与事件序号、阶段共同返回；前端兼容旧的平铺 data。
 
-## 事件
+前端在连接结束或断网后查询持久化结果，仍 running 时带最后序号续接并去重。查不到结果连续三次或观察超过六分钟，显示“继续查看本次运行”，不会重新 POST 消耗生成次数。相同需求的待完成 runId 保存在当前浏览器会话，重新打开可续看；修改需求使旧预览失效，需要明确重新生成。中止查看不会取消服务端计算。
 
-每个运行写入 `runs` / `run_events`：`model`（动作）、`tool_call`、`tool_result`、`model_error`、`completed`/`failed`/`need_input`。
+事件按字段裁剪后编码为完整 JSON，最长 4,000 字符；模型 observation 同样保留有效 JSON。较早版本已截坏的历史事件显示“摘要不完整”，不阻止读取运行结果。事件流开始前释放认证查询占用的数据库连接。
 
-`GET /api/v1/runs/{id}/events` 按 `Last-Event-ID` 游标回放；P0 不是实时推送，也不是后台队列。
+## 保存前的完整预览
 
-## 边界
+完成结果包含用户标题、真实道路算出的逐站 timeline、逐日指标、includedIds、omittedIds、路线来源与警告。前端展示日期、顺序、开始/结束、停留、转场、等待、必去和固定时间、可选地点取舍。缺少完整逐站预览或有硬冲突时不能保存。
 
-- 不存储 prompt、思维链或密钥；工具参数与结果摘要截断到 4KB。
-- 不生成坐标、地点 id；不写数据库。
-- 只覆盖“已确认候选 → 方案”这一段；地点搜索/消歧留给 P2。
-- 前端提供“用 Agent 规划（实验）”入口和实时轨迹面板；真实 Groq 线上已跑通（P0 同步版），P1 流式版本已在线上复验（下文）。
-- 进程重启会把仍为 running 的运行标记为 interrupted，不跨进程续跑。
+空余时间未自动安排餐休，景区内部步行、营业、票务和预约仍需确认。模型 summary 只是说明文字，实际约束与警告以程序核验结果为准。
+
+## 验证口径
+
+本轮自动化：前端 92 项、后端 139 项、Ruff、类型检查与构建通过；原固定工程任务 30/30。新增 Agent 回归覆盖候选越界、同日/跨日重复、必去遗漏、可选取舍、标题、同站往返与返程晚到、有效长 JSON/历史损坏、SSE 状态与跨域游标、断线恢复、去重、取消查看、待运行恢复和旧预览失效。
+
+原来的 30 条是工程固定任务，并非 Agent 模型准确率。真实模型与浏览器验收在 verification.md 追加，测试中脚本化模型不冒充真实 AI。
