@@ -68,7 +68,15 @@ def main() -> int:
         if response.status_code != 200:
             print('供应商返回失败，未打印密钥。响应片段：', response.text[:300])
             return 3
-        content = response.json()['choices'][0]['message']['content']
+        choice = response.json()['choices'][0]
+        content = choice['message']['content']
+        refusal = any(text in content.lower() for text in (
+            'accounts that have not been recharged can only try', 'insufficient balance',
+            'increase the free quota after recharging', '免费额度已用完', '试用次数已用完'))
+        if refusal:
+            print('供应商拒绝：账号免费试用额度已用尽，需充值后才会恢复；未产生模型结果。')
+            print('原文：', content[:200])
+            return 4
         value = json.loads(content)
         if not isinstance(value, dict):
             raise ValueError('返回内容不是 JSON 对象')

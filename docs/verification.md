@@ -132,3 +132,9 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - `model_json` 增加 401/403、429、404 的分类提示，避免所有失败都显示成“服务不可用”。
 - 新增测试：用本机 HTTP 假供应商模拟 OpenAI 兼容接口，验证请求路径 `/v1/chat/completions`、Bearer 头、`response_format=json_object`、模型名与返回排序被采用；`/planner/draft` 的 `source` 变为 `model`。
 - 后端 55 项通过；真实 Z.AI 调用仍缺密钥，未产生费用。
+
+### AIHubMix 免费额度实测（2026-11-04）
+
+- 用用户提供的 key 调用 `coding-glm-5.1-free`：HTTP 200，但模型正文是“未充值账号只能试用 10 次”的额度拒绝，不是 JSON。
+- 后端 `parse_model_json` 能识别该文本并返回 503（不重试、不计为格式错误）；`scripts/model-check.py` 现在也单独识别并返回 4。
+- 结论：该账号免费试用已用尽，需充值或换 Z.AI `glm-4.7-flash`（免费档）。未产生模型结果或费用。
