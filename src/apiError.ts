@@ -1,5 +1,5 @@
 export class ApiError extends Error {
- constructor(public status:number,message:string){super(message);this.name='ApiError'}
+ constructor(public status:number,message:string,public detail?:unknown){super(message);this.name='ApiError'}
 }
 export function apiErrorMessage(detail:unknown,status:number):string {
  if(typeof detail==='string'&&detail.trim())return detail

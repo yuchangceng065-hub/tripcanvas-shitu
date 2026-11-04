@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One-shot provider check for the JSON planner adapter.
 
-Reads MODEL_BASE_URL / MODEL_API_KEY / MODEL_NAME (optionally from .env),
+Reads MODEL_BASE_URL / MODEL_NAME and the provider key (Groq: GROQ_API_KEY),
 sends one small chat/completions request and verifies the JSON object.
 
     .venv/bin/python scripts/model-check.py
@@ -14,10 +14,13 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0,str(ROOT))
+from backend.model_config import model_options as options_for,model_api_key,model_key_name
 
 
 def load_env(path: Path = ROOT / '.env') -> None:
@@ -31,21 +34,13 @@ def load_env(path: Path = ROOT / '.env') -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-def options_for(base: str, model: str) -> dict:
-    name = model.lower()
-    options: dict = {'reasoning_effort': 'none'} if base.startswith('https://aihubmix.com') else {}
-    if name in ('coding-glm-5.1-free', 'glm-5.1') or (base.startswith('https://api.z.ai') and (name.startswith('glm-5') or 'flash' in name)):
-        options['thinking'] = {'type': 'disabled'}
-    return options
-
-
 def main() -> int:
     load_env()
     base = os.getenv('MODEL_BASE_URL', '').strip()
-    key = os.getenv('MODEL_API_KEY', '').strip()
+    key = model_api_key(base)
     model = os.getenv('MODEL_NAME', '').strip()
     if not (base and key and model):
-        print('缺少 MODEL_BASE_URL / MODEL_API_KEY / MODEL_NAME；请在 .env 或环境变量中配置。')
+        print('缺少 MODEL_BASE_URL / MODEL_NAME / '+model_key_name(base)+'；请在 .env 或环境变量中配置。')
         return 2
     payload = {
         'model': model,
@@ -54,8 +49,8 @@ def main() -> int:
             {'role': 'user', 'content': '返回 {"ok": true, "city": "杭州", "days": 1}'},
         ],
         'response_format': {'type': 'json_object'},
-        'temperature': 0,
-        'max_tokens': 200,
+        'temperature': 0.2,
+        'max_tokens': 1024 if urlsplit(base).hostname=='api.groq.com' else 200,
         'stream': False,
         **options_for(base, model),
     }

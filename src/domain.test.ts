@@ -16,3 +16,10 @@ it('搜索地点快照可恢复坐标和时间轴',async()=>{
  expect(capturePlaces(trip).placeSnapshots?.[0]?.lng).toBe(120.14)
  expect(placeById(place.id).name).toBe(place.name);expect(schedule(trip,0)[0]!.place.name).toBe(place.name)
 })
+
+it('已保存方案在手工编辑后仍显示必去缺失，不能误报检查通过',()=>{
+ const t=createTrip()
+ t.requirements={city:'杭州',startDate:t.days[0]!.date,days:t.days.length,people:t.people,mode:t.mode,start:570,end:1110,pace:'balanced',interests:[],mustVisitIds:['quyuan']}
+ t.days[0]!.activities=t.days[0]!.activities.filter(a=>a.placeId!=='quyuan')
+ expect(validate(t).some(issue=>issue.id==='must-quyuan'&&issue.severity==='error')).toBe(true)
+})

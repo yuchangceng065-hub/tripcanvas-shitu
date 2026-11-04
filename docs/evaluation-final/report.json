@@ -1,0 +1,1133 @@
+{
+  "mode": "offline-contract-fixtures",
+  "externalProviderRequests": 0,
+  "modelCalls": 0,
+  "suiteVersion": "1.0",
+  "suiteSha256": "4cf27f234df3e5d979caa27322493b8366ce35d8e0cedfc0d4d6f5f002b58fa0",
+  "sourceCommit": "7d4b8b419798d2cd95485ad9d7246e984a8fde08",
+  "sourceHashes": {
+    "backend/alternatives.py": "1598368ae17a53272bf44cb23fa8a8fcc4ab13d5dcd6ffc031204a307c45e85b",
+    "backend/amap.py": "1a934a2643e18122abb7a32ac981f67bfd23951cc6343bef652270de3a609d3e",
+    "backend/app.py": "c8a78c71e6e6ec64837ae1dd62b32456883c8cd3a5ed568a409cf78685fb95a2",
+    "backend/catalog.py": "2e591a451a2240695d9290ca22bef70c3a63ce57c8def8f593ceb1a874e798cf",
+    "backend/evaluation.py": "e7cf7dfdd834600e3113fd47f59e045eb06a97d91223901a959af9d89c468487",
+    "backend/model_config.py": "f6ed17a6aa8f6155c2220c38d34c96132d44698991b931912102af209a5f7f9b",
+    "backend/model_metrics.py": "283808dd5fc260e164236d736d4197a0c3ffd6cdd4db60dc5e0f048469bde0f3",
+    "backend/planning.py": "f5758909a2e3d2c68db9c963aec1404d01ad1f952e487eb5b36850976e88f6d3",
+    "backend/requirements.py": "d8f5d8e69fb4a62078682223b51732cf59c296f6a66f5a1037426d47c4f03718",
+    "backend/routing.py": "51ebb650160a1ab16a7871acf7f43f7dca2266816bacfd03fb103fe5871fa5da",
+    "backend/start.py": "e17dfbdaa63a35dc8dffd458902fce63d408adbfec1c30b110e6a2a8d3adb21d",
+    "scripts/evaluate.py": "e0acec5b7a12544d50cab212d4e65db41151e79890493aa684583951b99532f5",
+    "scripts/evaluate_live.py": "73acacfd6578dcf0752d2ed0ec5db94dcff2651e217e5357f237997f18e30d92"
+  },
+  "python": "3.12.16",
+  "generatedAt": "2026-11-04T18:22:42.453751+00:00",
+  "summary": {
+    "total": 30,
+    "passed": 30,
+    "failed": 0,
+    "feasibleTasks": 10,
+    "feasibleTasksSucceeded": 10,
+    "negativePlanningTasks": 4,
+    "invalidAccepted": 0,
+    "p50Ms": 1.42,
+    "p95Ms": 11.22
+  },
+  "results": [
+    {
+      "id": "P01",
+      "title": "多地点与固定返程",
+      "kind": "parse",
+      "split": "development",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 1.2,
+      "requirements": {
+        "startDate": "2026-11-14",
+        "days": 2,
+        "people": 2,
+        "pace": "relaxed",
+        "interests": [
+          "咖啡"
+        ],
+        "returnBy": 1020
+      },
+      "missing": [],
+      "disposition": "understood"
+    },
+    {
+      "id": "P02",
+      "title": "下午五点半",
+      "kind": "parse",
+      "split": "development",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.08,
+      "requirements": {
+        "startDate": "2026-11-14",
+        "days": 1,
+        "people": 2,
+        "returnBy": 1050
+      },
+      "missing": [],
+      "disposition": "understood"
+    },
+    {
+      "id": "P03",
+      "title": "否定自驾并选择步行",
+      "kind": "parse",
+      "split": "development",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.24,
+      "requirements": {
+        "startDate": "2026-11-14",
+        "days": 1,
+        "people": 1,
+        "mode": "walk"
+      },
+      "missing": [],
+      "disposition": "understood"
+    },
+    {
+      "id": "P04",
+      "title": "缺少日期需要确认",
+      "kind": "parse",
+      "split": "development",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.14,
+      "requirements": {
+        "days": 2,
+        "people": 2
+      },
+      "missing": [
+        "startDate"
+      ],
+      "disposition": "confirmation_required"
+    },
+    {
+      "id": "P05",
+      "title": "同名别名且角色独立",
+      "kind": "parse",
+      "split": "development",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.03,
+      "requirements": {
+        "startDate": "2026-11-14",
+        "days": 2,
+        "people": 2
+      },
+      "missing": [],
+      "disposition": "understood"
+    },
+    {
+      "id": "P06",
+      "title": "二十四小时返程",
+      "kind": "parse",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.04,
+      "requirements": {
+        "startDate": "2026-12-01",
+        "days": 1,
+        "people": 1,
+        "mode": "walk",
+        "returnBy": 1050
+      },
+      "missing": [],
+      "disposition": "understood"
+    },
+    {
+      "id": "P07",
+      "title": "五点歧义不猜上午下午",
+      "kind": "parse",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.03,
+      "requirements": {
+        "startDate": "2026-11-14",
+        "days": 2,
+        "people": 2
+      },
+      "missing": [
+        "returnBy"
+      ],
+      "disposition": "confirmation_required"
+    },
+    {
+      "id": "P08",
+      "title": "无效日期不捏造",
+      "kind": "parse",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.01,
+      "requirements": {
+        "days": 2,
+        "people": 2
+      },
+      "missing": [
+        "startDate"
+      ],
+      "disposition": "confirmation_required"
+    },
+    {
+      "id": "P09",
+      "title": "夜间返程与自驾少走路",
+      "kind": "parse",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.02,
+      "requirements": {
+        "startDate": "2026-11-14",
+        "days": 3,
+        "people": 10,
+        "mode": "drive",
+        "pace": "relaxed",
+        "returnBy": 1170
+      },
+      "missing": [],
+      "disposition": "understood"
+    },
+    {
+      "id": "P10",
+      "title": "中午十二点与起点",
+      "kind": "parse",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.04,
+      "requirements": {
+        "startDate": "2026-11-14",
+        "days": 1,
+        "people": 2,
+        "returnBy": 720
+      },
+      "missing": [],
+      "disposition": "understood"
+    },
+    {
+      "id": "S01",
+      "title": "一日三方案",
+      "kind": "plan",
+      "split": "development",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 3.44,
+      "disposition": "generated",
+      "options": 3,
+      "dayRouteQueries": 12,
+      "search": {
+        "evaluatedStates": 23,
+        "dayRouteQueries": 12,
+        "maxDayRouteQueries": 12,
+        "limited": true,
+        "reason": "道路查询预算已达到上限",
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": [
+        {
+          "walkingKm": 0.6,
+          "travelMinutes": 10,
+          "visitMinutes": 120,
+          "freeMinutes": 440,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 120,
+              "freeMinutes": 440,
+              "finish": 670,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 1.8,
+          "travelMinutes": 30,
+          "visitMinutes": 360,
+          "freeMinutes": 180,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 1.8,
+              "travelMinutes": 30,
+              "visitMinutes": 360,
+              "freeMinutes": 180,
+              "finish": 930,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 0.6,
+          "travelMinutes": 10,
+          "visitMinutes": 180,
+          "freeMinutes": 380,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 180,
+              "freeMinutes": 380,
+              "finish": 730,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S02",
+      "title": "从过满首日跨日修复",
+      "kind": "plan",
+      "split": "development",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 5.48,
+      "disposition": "generated",
+      "options": 2,
+      "dayRouteQueries": 9,
+      "search": {
+        "evaluatedStates": 24,
+        "dayRouteQueries": 9,
+        "maxDayRouteQueries": 12,
+        "limited": false,
+        "reason": null,
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": [
+        {
+          "walkingKm": 1.2,
+          "travelMinutes": 20,
+          "visitMinutes": 240,
+          "freeMinutes": 100,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 120,
+              "freeMinutes": 50,
+              "finish": 670,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            },
+            {
+              "day": 1,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 120,
+              "freeMinutes": 50,
+              "finish": 670,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 1.2,
+          "travelMinutes": 20,
+          "visitMinutes": 330,
+          "freeMinutes": 10,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 165,
+              "freeMinutes": 5,
+              "finish": 715,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            },
+            {
+              "day": 1,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 165,
+              "freeMinutes": 5,
+              "finish": 715,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S03",
+      "title": "按真实道路换序",
+      "kind": "plan",
+      "split": "development",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 1.42,
+      "disposition": "generated",
+      "options": 2,
+      "dayRouteQueries": 6,
+      "search": {
+        "evaluatedStates": 18,
+        "dayRouteQueries": 6,
+        "maxDayRouteQueries": 12,
+        "limited": false,
+        "reason": null,
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": [
+        {
+          "walkingKm": 1.2,
+          "travelMinutes": 20,
+          "visitMinutes": 180,
+          "freeMinutes": 40,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 1.2,
+              "travelMinutes": 20,
+              "visitMinutes": 180,
+              "freeMinutes": 40,
+              "finish": 740,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 1.2,
+          "travelMinutes": 20,
+          "visitMinutes": 210,
+          "freeMinutes": 10,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 1.2,
+              "travelMinutes": 20,
+              "visitMinutes": 210,
+              "freeMinutes": 10,
+              "finish": 770,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S04",
+      "title": "两日默认必去全保留",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 5.38,
+      "disposition": "generated",
+      "options": 2,
+      "dayRouteQueries": 12,
+      "search": {
+        "evaluatedStates": 24,
+        "dayRouteQueries": 12,
+        "maxDayRouteQueries": 12,
+        "limited": false,
+        "reason": null,
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": [
+        {
+          "walkingKm": 1.2,
+          "travelMinutes": 20,
+          "visitMinutes": 240,
+          "freeMinutes": 880,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 120,
+              "freeMinutes": 440,
+              "finish": 670,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            },
+            {
+              "day": 1,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 120,
+              "freeMinutes": 440,
+              "finish": 670,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 1.2,
+          "travelMinutes": 20,
+          "visitMinutes": 360,
+          "freeMinutes": 760,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 180,
+              "freeMinutes": 380,
+              "finish": 730,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            },
+            {
+              "day": 1,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 180,
+              "freeMinutes": 380,
+              "finish": 730,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S05",
+      "title": "三日分配与起终点",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 9.82,
+      "disposition": "generated",
+      "options": 3,
+      "dayRouteQueries": 12,
+      "search": {
+        "evaluatedStates": 17,
+        "dayRouteQueries": 12,
+        "maxDayRouteQueries": 12,
+        "limited": true,
+        "reason": "道路查询预算已达到上限",
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": [
+        {
+          "walkingKm": 1.8,
+          "travelMinutes": 30,
+          "visitMinutes": 240,
+          "freeMinutes": 1410,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 1.2,
+              "travelMinutes": 20,
+              "visitMinutes": 120,
+              "freeMinutes": 415,
+              "finish": 695,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            },
+            {
+              "day": 1,
+              "walkingKm": 0.0,
+              "travelMinutes": 0,
+              "visitMinutes": 60,
+              "freeMinutes": 510,
+              "finish": 600,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            },
+            {
+              "day": 2,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 60,
+              "freeMinutes": 485,
+              "finish": 1035,
+              "overMinutes": 0,
+              "waitingMinutes": 410
+            }
+          ]
+        },
+        {
+          "walkingKm": 3.0,
+          "travelMinutes": 50,
+          "visitMinutes": 520,
+          "freeMinutes": 1110,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 1.2,
+              "travelMinutes": 20,
+              "visitMinutes": 180,
+              "freeMinutes": 355,
+              "finish": 755,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            },
+            {
+              "day": 1,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 150,
+              "freeMinutes": 410,
+              "finish": 700,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            },
+            {
+              "day": 2,
+              "walkingKm": 1.2,
+              "travelMinutes": 20,
+              "visitMinutes": 190,
+              "freeMinutes": 345,
+              "finish": 1035,
+              "overMinutes": 0,
+              "waitingMinutes": 270
+            }
+          ]
+        },
+        {
+          "walkingKm": 1.8,
+          "travelMinutes": 30,
+          "visitMinutes": 360,
+          "freeMinutes": 1290,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 90,
+              "freeMinutes": 455,
+              "finish": 655,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            },
+            {
+              "day": 1,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 180,
+              "freeMinutes": 380,
+              "finish": 730,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            },
+            {
+              "day": 2,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 90,
+              "freeMinutes": 455,
+              "finish": 1035,
+              "overMinutes": 0,
+              "waitingMinutes": 380
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S06",
+      "title": "单地点相同结果合并",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.34,
+      "disposition": "generated",
+      "options": 2,
+      "dayRouteQueries": 0,
+      "search": {
+        "evaluatedStates": 3,
+        "dayRouteQueries": 0,
+        "maxDayRouteQueries": 12,
+        "limited": false,
+        "reason": null,
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": [
+        {
+          "walkingKm": 0.0,
+          "travelMinutes": 0,
+          "visitMinutes": 45,
+          "freeMinutes": 525,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.0,
+              "travelMinutes": 0,
+              "visitMinutes": 45,
+              "freeMinutes": 525,
+              "finish": 585,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 0.0,
+          "travelMinutes": 0,
+          "visitMinutes": 60,
+          "freeMinutes": 510,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.0,
+              "travelMinutes": 0,
+              "visitMinutes": 60,
+              "freeMinutes": 510,
+              "finish": 600,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S07",
+      "title": "步行预算驱动可选取舍",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 2.76,
+      "disposition": "generated",
+      "options": 2,
+      "dayRouteQueries": 12,
+      "search": {
+        "evaluatedStates": 23,
+        "dayRouteQueries": 12,
+        "maxDayRouteQueries": 12,
+        "limited": true,
+        "reason": "道路查询预算已达到上限",
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": [
+        {
+          "walkingKm": 0.6,
+          "travelMinutes": 10,
+          "visitMinutes": 120,
+          "freeMinutes": 440,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 120,
+              "freeMinutes": 440,
+              "finish": 670,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 0.6,
+          "travelMinutes": 10,
+          "visitMinutes": 180,
+          "freeMinutes": 380,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.6,
+              "travelMinutes": 10,
+              "visitMinutes": 180,
+              "freeMinutes": 380,
+              "finish": 730,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S08",
+      "title": "自驾完整接驳计入指标",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 2.95,
+      "disposition": "generated",
+      "options": 3,
+      "dayRouteQueries": 12,
+      "search": {
+        "evaluatedStates": 23,
+        "dayRouteQueries": 12,
+        "maxDayRouteQueries": 12,
+        "limited": true,
+        "reason": "道路查询预算已达到上限",
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": [
+        {
+          "walkingKm": 0.4,
+          "travelMinutes": 20,
+          "visitMinutes": 120,
+          "freeMinutes": 430,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.4,
+              "travelMinutes": 20,
+              "visitMinutes": 120,
+              "freeMinutes": 430,
+              "finish": 680,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 1.2,
+          "travelMinutes": 60,
+          "visitMinutes": 360,
+          "freeMinutes": 150,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 1.2,
+              "travelMinutes": 60,
+              "visitMinutes": 360,
+              "freeMinutes": 150,
+              "finish": 960,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 0.4,
+          "travelMinutes": 20,
+          "visitMinutes": 180,
+          "freeMinutes": 370,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.4,
+              "travelMinutes": 20,
+              "visitMinutes": 180,
+              "freeMinutes": 370,
+              "finish": 740,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S09",
+      "title": "可选全部允许舍弃但不变空计划",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 1.8,
+      "disposition": "generated",
+      "options": 3,
+      "dayRouteQueries": 10,
+      "search": {
+        "evaluatedStates": 24,
+        "dayRouteQueries": 10,
+        "maxDayRouteQueries": 12,
+        "limited": false,
+        "reason": null,
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": [
+        {
+          "walkingKm": 0.0,
+          "travelMinutes": 0,
+          "visitMinutes": 60,
+          "freeMinutes": 510,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.0,
+              "travelMinutes": 0,
+              "visitMinutes": 60,
+              "freeMinutes": 510,
+              "finish": 600,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 1.2,
+          "travelMinutes": 20,
+          "visitMinutes": 270,
+          "freeMinutes": 280,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 1.2,
+              "travelMinutes": 20,
+              "visitMinutes": 270,
+              "freeMinutes": 280,
+              "finish": 830,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 0.0,
+          "travelMinutes": 0,
+          "visitMinutes": 90,
+          "freeMinutes": 480,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 0.0,
+              "travelMinutes": 0,
+              "visitMinutes": 90,
+              "freeMinutes": 480,
+              "finish": 630,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "道路预算耗尽仅保留已核验结果",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.63,
+      "disposition": "generated",
+      "options": 2,
+      "dayRouteQueries": 1,
+      "search": {
+        "evaluatedStates": 6,
+        "dayRouteQueries": 1,
+        "maxDayRouteQueries": 1,
+        "limited": true,
+        "reason": "道路查询预算已达到上限",
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": [
+        {
+          "walkingKm": 1.8,
+          "travelMinutes": 30,
+          "visitMinutes": 240,
+          "freeMinutes": 300,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 1.8,
+              "travelMinutes": 30,
+              "visitMinutes": 240,
+              "freeMinutes": 300,
+              "finish": 810,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        },
+        {
+          "walkingKm": 1.8,
+          "travelMinutes": 30,
+          "visitMinutes": 360,
+          "freeMinutes": 180,
+          "days": [
+            {
+              "day": 0,
+              "walkingKm": 1.8,
+              "travelMinutes": 30,
+              "visitMinutes": 360,
+              "freeMinutes": 180,
+              "finish": 930,
+              "overMinutes": 0,
+              "waitingMinutes": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "时间不够不删除必去",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 3.28,
+      "disposition": "infeasible",
+      "options": 0,
+      "dayRouteQueries": 8,
+      "search": {
+        "evaluatedStates": 24,
+        "dayRouteQueries": 8,
+        "maxDayRouteQueries": 12,
+        "limited": false,
+        "reason": null,
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": []
+    },
+    {
+      "id": "S12",
+      "title": "驾车步行距离未知不能声称满足预算",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.46,
+      "disposition": "infeasible",
+      "options": 0,
+      "dayRouteQueries": 2,
+      "search": {
+        "evaluatedStates": 6,
+        "dayRouteQueries": 2,
+        "maxDayRouteQueries": 12,
+        "limited": false,
+        "reason": null,
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": []
+    },
+    {
+      "id": "S13",
+      "title": "上游配额失败有界停止",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.28,
+      "disposition": "unavailable",
+      "options": 0,
+      "dayRouteQueries": 1,
+      "search": {
+        "evaluatedStates": 3,
+        "dayRouteQueries": 1,
+        "maxDayRouteQueries": 12,
+        "limited": true,
+        "reason": "评测夹具：道路服务配额已满",
+        "routeFailures": []
+      },
+      "invalidAccepted": false,
+      "optionMetrics": []
+    },
+    {
+      "id": "S14",
+      "title": "所有道路不可达不造零时长",
+      "kind": "plan",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 0.98,
+      "disposition": "unavailable",
+      "options": 0,
+      "dayRouteQueries": 6,
+      "search": {
+        "evaluatedStates": 18,
+        "dayRouteQueries": 6,
+        "maxDayRouteQueries": 12,
+        "limited": false,
+        "reason": null,
+        "routeFailures": [
+          "评测夹具：这些地点之间无道路"
+        ]
+      },
+      "invalidAccepted": false,
+      "optionMetrics": []
+    },
+    {
+      "id": "G01",
+      "title": "返程站缺失不能确认",
+      "kind": "guard",
+      "split": "development",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 2.95,
+      "disposition": "guarded",
+      "invalidAccepted": false
+    },
+    {
+      "id": "G02",
+      "title": "固定预约不能跨日",
+      "kind": "guard",
+      "split": "development",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 5.28,
+      "disposition": "guarded",
+      "invalidAccepted": false
+    },
+    {
+      "id": "G03",
+      "title": "确认重试只产生一个版本",
+      "kind": "guard",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 6.25,
+      "disposition": "guarded",
+      "invalidAccepted": false
+    },
+    {
+      "id": "G04",
+      "title": "旧版本不能覆盖更新",
+      "kind": "guard",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 6.39,
+      "disposition": "guarded",
+      "invalidAccepted": false
+    },
+    {
+      "id": "G05",
+      "title": "旅行与历史不能越权读取",
+      "kind": "guard",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 85.24,
+      "disposition": "guarded",
+      "invalidAccepted": false
+    },
+    {
+      "id": "G06",
+      "title": "只读快照撤销且不随编辑变化",
+      "kind": "guard",
+      "split": "regression",
+      "passed": true,
+      "errors": [],
+      "elapsedMs": 11.22,
+      "disposition": "guarded",
+      "invalidAccepted": false
+    }
+  ]
+}

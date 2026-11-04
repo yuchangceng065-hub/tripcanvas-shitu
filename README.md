@@ -2,15 +2,15 @@
 
 面向杭州 1—3 日短途游的个人行程规划网页，使用 Vue 3 + TypeScript 和 FastAPI。支持真实地点搜索、步行 / 自驾接驳路线及地图时间轴编辑。首次打开是杭州西湖的可编辑示例行程。
 
-当前执行范围、里程碑与验收标准见 [杭州版本执行计划](docs/hangzhou-plan.md)；已完成与未完成能力见 [能力清单](docs/capability-matrix.md)。现阶段已支持候选地点草案、单地点意图加入和局部路线调整；“一句完整需求生成全程”仍是进行中的 M1 任务。
+当前执行范围、里程碑与验收标准见 [杭州版本执行计划](docs/hangzhou-plan.md)；已完成与未完成能力见 [能力清单](docs/capability-matrix.md)。现阶段已支持候选地点草案、单地点意图加入和局部路线调整；规则需求确认与模型分日排序已接通，多方案可在新建旅行中比较。
 
-## 当前状态（2026-11-04）
+## 当前状态（2026-11-05）
 
 - 线上前端：https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site/ ，Sites 静态托管，仅所有者可访问。
-- 线上 API：https://tripcanvas-api.onrender.com/api/v1 ，Render Free 单实例；数据库为 Neon Free PostgreSQL。健康检查返回 `plannerMode=rules`、`model=false`、`map=amap`、`routing=amap`、`storage=postgresql`。
+- 线上 API：https://tripcanvas-api.onrender.com/api/v1 ，Render Free 单实例；数据库为 Neon Free PostgreSQL。健康检查返回 `plannerMode=model`、`model=true`、`map=amap`、`routing=amap`、`storage=postgresql`。
 - 线上已验收：注册登录、Bearer 会话、行程同步、版本记录、快照分享与撤销、高德地图与路线、地点搜索、停车接驳。
-- 规划模式：`PLANNER_MODE=rules`，服务端不调用模型。模型适配代码保留，待有可用额度并确认模型 ID 后再启用。
-- 自动化基线：前端 63 项、后端 52 项测试通过，生产构建通过。
+- 规划模式：线上已启用 Groq Free Tier 的 `openai/gpt-oss-20b`，支持真实模型分日排序与局部修改；规则草案仍可单独选择。
+- 自动化：前端 77 项（含实际 Vue 组件交互）、后端 118 项测试通过，生产构建通过；最新修复记录见 `docs/verification.md`。
 
 ## 当前实现
 
@@ -25,20 +25,22 @@
 - 本地持久化、不可变版本记录和恢复；行程摘要、JSON 和独立 HTML 卡片导出。
 - 配套 FastAPI 账号、HttpOnly 会话、用户归属校验、版本同步、快照分享与撤销。
 - 新建旅行向导：一句需求规则解析（日期、天数、人数、交通、节奏、兴趣、地点提及与返程时间）→ 真实地点候选确认 → 候选地点 → 规则或模型分日排序 → 道路核验 → 服务端确认事务保存。
+- 新建候选步骤可标记“必去 / 可选”，使用“生成多方案 · 主动协调”比较少走路、充分游览、轻松休闲。有限搜索会尝试同日重排、跨日移动、建议范围内缩短停留及舍弃可选点；真实整日路线核验后展示指标，必去与固定返程不会被自动放松。详情见 `docs/alternatives.md`。
 - 草案保存与助手方案应用走 `/planner/confirm`：服务端重新计算道路、复核硬约束与锁定，版本冲突返回 409，冲突返回带修复选项的 422。
+- 冲突修复先调用只读 `/planner/preview` 重算逐站时间、路线与剩余问题，用户再次确认才保存。预览失败可重试；最终确认失败保留结构化修复选项。固定预约保护日期与时段；返程要求核验实际车站、末日位置和最早到达。
 - 需求卡支持每日步行预算：按高德分段路线累计步行接驳，超预算为硬冲突并给出删减选项；11:30—13:30 没有 40 分钟空档时给出用餐/休息提醒（警告不阻断保存）。
 - 真实地点搜索：高德地点文本搜索（杭州行政区内），或 Photon（无高德密钥时）；搜索结果持久化到服务端地点目录，旅行快照保存服务端核实过的坐标。
 
 ## 未完成与已知边界
 
 - 一句需求目前是规则解析：能提取日期、天数、人数、交通、节奏、兴趣、地点提及与返程时间，并搜索真实候选；复杂条件、主动推荐候选和自由表达仍有限，地点必须由用户确认。
-- 没有三套有实质差异且经过道路核验的方案比较；用餐 / 休息只有空档提醒，不会自动插入休息时间或餐厅。
-- 规划与校验仍分散在前后端，最终确认尚未收敛到后端权威事务。
+- 新增最多三套真实路线方案比较；用餐 / 休息仍只有空档提醒，空余指标不等于已插入用餐安排。
+- 草案与助手应用已走后端权威确认；手工编辑仍可直接保存为草稿，尚未统一所有编辑入口。
 - 运行事件只回放已完成结果，不是逐阶段后台任务；没有数据库迁移体系（当前用 SQLAlchemy 自动建表）。
 - 不支持公交地铁、多城市、实时导航、未来出行日交通预测；营业时间、门票、预约、停车可用性没有实时核验。
 - 自驾假设车辆初始停在当天首站选定（或推荐）的停车点，不是从用户任意位置出发的门到门方案；景区内部通行与入场时间未覆盖。
-- 地点搜索使用杭州周边经纬度框，可能返回邻近城市结果；按行政区精确筛选待实现。
-- 模型未启用：免费供应方试用额度用尽后已按用户选择暂停，规则模式可独立完成现有流程。
+- 高德搜索使用杭州行政区限制；无密钥时 Photon 使用周边经纬度框，边界结果需核对地址。
+- 模型现使用 Groq 免费档，容量与限流以账户为准；达到限制会明确返回错误，不自动切换付费服务。规则草案仍可独立使用。
 - 旅行卡片文件和摘要是独立副本，发送后不能远程撤销；服务端分享链接支持撤销。
 - 费用为示例个人预算；图片是氛围配图，不是景点实景。
 
@@ -68,7 +70,9 @@ python3 -m venv .venv
 环境变量见 `.env.example`，通过运行环境注入后端，密钥不得使用 `VITE_` 前缀。
 
 - 高德：`AMAP_WEB_KEY`、`AMAP_JS_KEY`、`AMAP_JS_SECURITY_CODE` 齐备且 `ROUTING_PROVIDER` 不为 `osrm` 时启用；`PUBLIC_API_ORIGIN` 为 API 的 HTTPS 地址，用于 JS 安全代理。
-- 模型：OpenAI 兼容的 `MODEL_BASE_URL` + `MODEL_API_KEY` + `MODEL_NAME`，且 `PLANNER_MODE` 不为 `rules` 才会调用。当前线上为 `rules`。
+- 模型：OpenAI 兼容的 `MODEL_BASE_URL` + `MODEL_API_KEY` + `MODEL_NAME`，且 `PLANNER_MODE` 不为 `rules` 才会调用。当前线上 Groq 为 `auto`，本地示例仍默认 `rules`。
+  - 当前已启用 Groq 免费档：`MODEL_BASE_URL=https://api.groq.com/openai/v1`、`MODEL_NAME=openai/gpt-oss-20b`，专用密钥变量为 `GROQ_API_KEY`。不会将旧的智谱 `MODEL_API_KEY` 发给 Groq。设置低推理强度且不返回 reasoning，仍由服务端校验 JSON 和业务约束。[Groq 官方参数](https://console.groq.com/docs/reasoning)。免费档实际额度以账户控制台为准；已完成真实 JSON 调用、线上模型草案和局部修改验收。
+  - 智谱国内官方免费款：`https://open.bigmodel.cn/api/paas/v4`，型号 `glm-4.7-flash`；在 [API Keys](https://bigmodel.cn/usercenter/proj-mgmt/apikeys) 创建国内站密钥，不能混用其他供应商的 Key。官方[免费发布说明](https://www.zhipuai.cn/zh/news/148)与[模型文档](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash)。账号限流以控制台为准，尚待用户密钥做真实验证。
   - Z.AI：地址 `https://api.z.ai/api/paas/v4`；免费档可用 `glm-4.7-flash`，`glm-5.1` 是付费旗舰（官方价 $1.4 / $4.4 每百万输入 / 输出 token）。
   - OpenRouter：地址 `https://openrouter.ai/api/v1`，模型 `z-ai/glm-5.1`（付费，没有 `:free` 变体）。
   - AIHubMix：地址 `https://aihubmix.com/v1`，模型 `coding-glm-5.1-free`；本账号试用额度已用尽，需充值或新账号。
@@ -91,13 +95,15 @@ API 仍在 8000 端口，前端使用 `npm run dev`。不要将示例配置直�
 
 ## 校验
 
+固定任务评测与真实模型冒烟必须分开记录，详见 [评测说明](docs/evaluation.md)。本次固定工程任务从 28/30 修复到 30/30；其中 10/10 可行规划任务成功、4 条负向任务未错误接受，模型调用为 0。
+
 ```sh
 npm test
 npm run build
 .venv/bin/python -m pytest backend/tests -q
 ```
 
-当前结果：前端 63 项、后端 52 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过。
+当前结果：前端 77 项、后端 118 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过。
 
 浏览器验收（需本地 API + Vite + Chrome 调试端口）：`node scripts/browser-check.mjs`，脚本会跑完“一句需求 → 地点确认 → 草案 → 确认保存”，并拒绝在非本地 API 上创建测试账号。测试覆盖锁定保护、仅修改指定日期、时间冲突与顺延协调、中文输入法 Enter、地点意图、道路结构校验、分享快照、撤销、用户隔离、版本幂等、高德响应与预算。
 

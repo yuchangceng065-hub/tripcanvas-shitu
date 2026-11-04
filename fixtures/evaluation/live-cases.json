@@ -1,0 +1,12 @@
+{
+  "version":"1.0",
+  "notes":"6条人工固定的真实模型冒烟任务，不是盲测或通用准确率评测。每个任务最多2次模型请求（含一次结构修复）；仅使用已配置的免费Groq服务。",
+  "cases":[
+    {"id":"L01","kind":"draft","title":"一日两站","ids":["quyuan","museum"],"days":1},
+    {"id":"L02","kind":"draft","title":"一日三站","ids":["quyuan","museum","art"],"days":1},
+    {"id":"L03","kind":"draft","title":"两日四站和固定返程","ids":["quyuan","museum","art","leifeng"],"days":2,"destination":"station","returnBy":1110},
+    {"id":"L04","kind":"edit","title":"只缩短第一站并保留锁定站","action":"shorten"},
+    {"id":"L05","kind":"edit","title":"只延后出发十五分钟","action":"depart"},
+    {"id":"L06","kind":"edit","title":"雨天替换第一站为室内","action":"indoor"}
+  ]
+}

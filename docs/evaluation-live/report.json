@@ -1,0 +1,131 @@
+{
+  "mode": "live-provider-smoke",
+  "releaseCommit": "7d4b8b419798d2cd95485ad9d7246e984a8fde08",
+  "suiteVersion": "1.0",
+  "suiteSha256": "c23a5634b548042a374c74b10b5c043f4e7de82917e2a6584c7910de04b64c2d",
+  "generatedAt": "2026-11-04T18:17:10.363038+00:00",
+  "provider": "Groq",
+  "model": "openai/gpt-oss-20b",
+  "taskLimit": 6,
+  "providerRequestUpperBound": 12,
+  "results": [
+    {
+      "id": "L01",
+      "title": "一日两站",
+      "passed": true,
+      "errors": [],
+      "seconds": 4.51,
+      "status": 200,
+      "modelUsage": {
+        "providerRequests": 1,
+        "repairRequests": 0,
+        "providerSeconds": 0.5245,
+        "promptTokens": 578,
+        "completionTokens": 33,
+        "totalTokens": 611,
+        "tokensComplete": true
+      }
+    },
+    {
+      "id": "L02",
+      "title": "一日三站",
+      "passed": true,
+      "errors": [],
+      "seconds": 3.0,
+      "status": 200,
+      "modelUsage": {
+        "providerRequests": 1,
+        "repairRequests": 0,
+        "providerSeconds": 0.5023,
+        "promptTokens": 725,
+        "completionTokens": 55,
+        "totalTokens": 780,
+        "tokensComplete": true
+      }
+    },
+    {
+      "id": "L03",
+      "title": "两日四站和固定返程",
+      "passed": true,
+      "errors": [],
+      "seconds": 3.13,
+      "status": 200,
+      "modelUsage": {
+        "providerRequests": 1,
+        "repairRequests": 0,
+        "providerSeconds": 0.6114,
+        "promptTokens": 877,
+        "completionTokens": 73,
+        "totalTokens": 950,
+        "tokensComplete": true
+      }
+    },
+    {
+      "id": "L04",
+      "title": "只缩短第一站并保留锁定站",
+      "passed": true,
+      "errors": [],
+      "seconds": 2.73,
+      "status": 200,
+      "modelUsage": {
+        "providerRequests": 1,
+        "repairRequests": 0,
+        "providerSeconds": 0.8102,
+        "promptTokens": 2240,
+        "completionTokens": 188,
+        "totalTokens": 2428,
+        "tokensComplete": true
+      }
+    },
+    {
+      "id": "L05",
+      "title": "只延后出发十五分钟",
+      "passed": true,
+      "errors": [],
+      "seconds": 3.86,
+      "status": 200,
+      "modelUsage": {
+        "providerRequests": 1,
+        "repairRequests": 0,
+        "providerSeconds": 0.7691,
+        "promptTokens": 2231,
+        "completionTokens": 172,
+        "totalTokens": 2403,
+        "tokensComplete": true
+      }
+    },
+    {
+      "id": "L06",
+      "title": "雨天替换第一站为室内",
+      "passed": true,
+      "errors": [],
+      "seconds": 4.6,
+      "status": 200,
+      "modelUsage": {
+        "providerRequests": 1,
+        "repairRequests": 0,
+        "providerSeconds": 0.8482,
+        "promptTokens": 2266,
+        "completionTokens": 154,
+        "totalTokens": 2420,
+        "tokensComplete": true
+      }
+    }
+  ],
+  "health": {
+    "status": "ok",
+    "model": true,
+    "plannerMode": "model",
+    "map": "amap",
+    "routing": "amap",
+    "storage": "postgresql"
+  },
+  "summary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "providerRequestsReported": 6,
+    "totalTokensReported": 9592,
+    "usageComplete": true
+  }
+}

@@ -13,6 +13,9 @@ STOPWORDS={'杭州','杭州市','西湖区','今天','明天','后天','周末',
 NUMERALS={'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10}
 
 def _number(token):
+    if '十' in token:
+        tens,ones=token.split('十')
+        return (NUMERALS.get(tens,1) if tens else 1)*10+(NUMERALS.get(ones,0) if ones else 0)
     return NUMERALS.get(token) or int(token)
 
 def _clock(hour,minute):
@@ -46,31 +49,55 @@ def parse_request(text,today=None):
     if days:requirements['days']=_number(days.group(1))
     people=re.search(r'([一二两三四五六七八九十]|\d{1,2})\s*(?:个)?人',text)
     if people:requirements['people']=_number(people.group(1))
-    if re.search(r'自驾|开车|驾车|租车',text):requirements['mode']='drive'
-    elif re.search(r'步行|走路|徒步|少走',text):requirements['mode']='walk'
+    # Resolve negation per mention instead of letting any drive keyword win.
+    modes=set()
+    for mode,pattern in (('drive',r'自驾|开车|驾车|租车'),('walk',r'步行|徒步|(?:全程|主要|选择|打算)走路')):
+        for occurrence in re.finditer(pattern,text):
+            prefix=re.split(r'[，,。；;、]',text[:occurrence.start()])[-1]
+            if not re.search(r'(?:不想|不要|不用|不再|不打算|不考虑|不选择|不|别|避免|取消)\s*$',prefix):modes.add(mode)
+    if len(modes)==1:requirements['mode']=modes.pop()
+    elif modes:notes.append('提到了多种交通方式，请确认本次使用步行还是自驾接驳。')
     if re.search(r'少走|不想走|轻松|不.{0,2}赶|悠闲|休闲|慢',text):requirements['pace']='relaxed'
     elif re.search(r'紧凑|充实|多逛|多去',text):requirements['pace']='full'
     interests=[interest for interest in INTERESTS if interest in text]
     if interests:requirements['interests']=interests
-    deadline=re.search(r'(\d{1,2})\s*[:：点]\s*(\d{2})?\s*前?\s*到\s*([^\s，。；、,;]+)',text) or re.search(r'到\s*([^\s，。；、,;]+?)\s*前',text)
+    deadline=re.search(r'(?P<period>凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*(?P<hour>\d{1,2}|[一二三四五六七八九十]{1,3})\s*(?P<separator>[:：点])\s*(?P<minute>半|\d{1,2}|[一二三四五六七八九十]{1,3})?\s*(?:分)?\s*前?\s*到\s*(?P<place>[^\s，。；、,;]+)',text)
     destination=None
+    ambiguous_deadline=False
     if deadline:
-        groups=deadline.groups()
-        if len(groups)>=3 and groups[0]:
-            try:
-                requirements['returnBy']=_clock(groups[0],groups[1])
-                destination=_clean_place(groups[2] or '')
-            except ValueError:notes.append('返程时间无法识别，请手动填写。')
-        else:destination=_clean_place(groups[0] or '')
+        destination=_clean_place(deadline['place'])
+        try:
+            hour=_number(deadline['hour']);period=deadline['period']
+            if period:
+                if not 1<=hour<=12:raise ValueError
+                if period in ('傍晚','晚上') and hour==12:
+                    ambiguous_deadline=True
+                elif period in ('下午','傍晚','晚上'):hour=hour%12+12
+                elif period=='凌晨':hour=hour%12
+                elif period=='中午':hour=hour if hour>=11 else hour+12
+            elif deadline['separator']=='点' and hour<12:
+                ambiguous_deadline=True
+            if ambiguous_deadline:notes.append('返程时间未注明上午或下午，请手动确认具体时刻。')
+            else:
+                minute=deadline['minute']
+                minute=30 if minute=='半' else _number(minute) if minute else 0
+                requirements['returnBy']=_clock(hour,minute)
+        except ValueError:
+            ambiguous_deadline=True;notes.append('返程时间无法识别，请手动填写。')
+    else:
+        bare=re.search(r'到\s*([^\s，。；、,;]+?)\s*前',text)
+        if bare:destination=_clean_place(bare.group(1))
     origin=re.search(r'从\s*([^\s，。；、,;]+?)\s*(?:出发|开始)',text)
     origin_text=_clean_place(origin.group(1)) if origin else None
     mentions=[];seen=set()
     def mention(value,role):
         value=_clean_place(value)
-        if not value or value in STOPWORDS or value in seen:return
+        value=ALIASES.get(value,value)
+        identity=(role,value)
+        if not value or value in STOPWORDS or identity in seen:return
         if re.fullmatch(r'[一二两三四五六七八九十\d]{1,3}[天日人个]?',value):return
         if '杭州'==value:return
-        seen.add(value);mentions.append({'text':ALIASES.get(value,value),'role':role})
+        seen.add(identity);mentions.append({'text':value,'role':role})
     def add_chunk(chunk):
         chunk=re.split(r'喜欢|想喝|爱吃|顺便',chunk)[0]
         for part in re.split(r'[、,，;；/]|和|跟|与|还有',chunk):
@@ -85,4 +112,5 @@ def parse_request(text,today=None):
         'destination':bool(destination),'origin':bool(origin_text),'mentions':[m['text'] for m in mentions]}
     missing=[key for key in ('startDate','days','people') if key not in requirements]
     if 'returnBy' in requirements and not destination:missing.append('destination')
+    if ambiguous_deadline:missing.append('returnBy')
     return {'requirements':requirements,'evidence':evidence,'missing':missing,'mentions':mentions,'notes':notes}

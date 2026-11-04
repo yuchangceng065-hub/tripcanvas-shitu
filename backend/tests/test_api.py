@@ -1,5 +1,4 @@
 import copy, os, tempfile, uuid
-os.environ['DATABASE_URL']='sqlite:///'+tempfile.mktemp(suffix='.db')
 from fastapi.testclient import TestClient
 from backend.app import app,Trip,verify_proposal,issues,attempts
 import pytest
@@ -154,6 +153,7 @@ def test_model_parser_accepts_only_complete_json_objects():
         with pytest.raises(ValueError):parse_model_json(content,reason)
 
 def test_free_glm_disables_thinking_and_repairs_locked_edit_once(client,monkeypatch):
+    monkeypatch.setenv('PLANNER_MODE','auto')
     import backend.app as module
     import httpx,json
     register(client);t=trip();t['days'][0]['activities'].append({'id':'c','placeId':'museum','duration':60,'lock':'none'})
@@ -357,6 +357,8 @@ def test_model_options_disable_hidden_thinking_for_glm_providers():
     zai=model_options('https://api.z.ai/api/paas/v4','glm-5.1')
     assert zai['thinking']=={'type':'disabled'}
     assert model_options('https://api.z.ai/api/paas/v4','glm-4.7-flash')['thinking']=={'type':'disabled'}
+    assert model_options('https://open.bigmodel.cn/api/paas/v4','glm-4.7-flash')['thinking']=={'type':'disabled'}
+    assert 'thinking' not in model_options('https://open.bigmodel.cn.invalid/v4','glm-4.7-flash')
     assert 'thinking' not in model_options('https://api.z.ai/api/paas/v4','qwen3')
     hub=model_options('https://aihubmix.com/v1','coding-glm-5.1-free')
     assert hub['reasoning_effort']=='none' and hub['thinking']=={'type':'disabled'}
@@ -370,7 +372,7 @@ def test_model_mode_calls_an_openai_compatible_provider(client,monkeypatch):
             calls.append({'path':self.path,'auth':self.headers.get('authorization'),'body':body})
             user=json.loads(body['messages'][1]['content'])
             content=json.dumps({'days':[list(reversed(user['candidateIds']))]},ensure_ascii=False)
-            payload=json.dumps({'choices':[{'message':{'content':content},'finish_reason':'stop'}]}).encode()
+            payload=json.dumps({'choices':[{'message':{'content':content},'finish_reason':'stop'}],'usage':{'prompt_tokens':123,'completion_tokens':24,'total_tokens':147}}).encode()
             self.send_response(200);self.send_header('content-type','application/json')
             self.send_header('content-length',str(len(payload)));self.end_headers();self.wfile.write(payload)
         def log_message(self,*args):pass
@@ -394,4 +396,131 @@ def test_model_mode_calls_an_openai_compatible_provider(client,monkeypatch):
         assert calls[0]['body']['model']=='glm-4.7-flash'
         places=[a['placeId'] for d in response.json()['trip']['days'] for a in d['activities']]
         assert places==['quyuan','museum']
+        usage=response.json()['modelUsage']
+        assert usage['providerRequests']==1 and usage['repairRequests']==0 and usage['totalTokens']==147 and usage['tokensComplete']
+        body['useModel']=False
+        reset=client.post('/api/v1/planner/draft',json=body).json()['modelUsage']
+        assert reset['providerRequests']==0 and reset['totalTokens']==0 and len(calls)==1
     finally:server.shutdown()
+
+@pytest.mark.parametrize('activities',[[],[{'id':'a','placeId':'quyuan','duration':60,'lock':'none'}]])
+def test_confirm_requires_actual_return_destination(client,activities):
+    register(client);t=trip();t['days'][0]['activities']=activities
+    t['requirements']={'city':'杭州','startDate':'2026-11-07','days':1,'people':2,'mode':'walk',
+        'destinationPlaceId':'station','returnBy':1020}
+    result=client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0})
+    assert result.status_code==422,result.text
+    assert 'return_missing' in {i['code'] for i in result.json()['detail']['issues']}
+    assert client.get('/api/v1/trips/'+t['id']).status_code==404
+
+@pytest.mark.parametrize('move',['date','day'])
+def test_confirm_keeps_fixed_appointment_date(client,move):
+    register(client);t=trip();t['days'][0]['activities']=[t['days'][0]['activities'][1]]
+    t['days'].append({'date':'2026-11-08','start':570,'end':1110,'activities':[]})
+    assert client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0}).status_code==200
+    changed=copy.deepcopy(t)
+    if move=='date':changed['days'][0]['date']='2026-11-09'
+    else:changed['days'][1]['activities']=changed['days'][0]['activities'];changed['days'][0]['activities']=[]
+    result=client.post('/api/v1/planner/confirm',json={'trip':changed,'baseRevision':1})
+    assert result.status_code==422 and result.json()['detail']['code']=='locked_violation'
+    assert client.get('/api/v1/trips/'+t['id']).json()['days']==t['days']
+
+def test_repair_preview_keeps_remaining_conflicts_and_never_saves(client,monkeypatch):
+    register(client)
+    async def slow(body):return {'source':'osrm','legs':[{'minutes':100,'distance':5} for _ in body.placeIds[1:]]}
+    monkeypatch.setattr(app.state.router,'route',slow)
+    t=trip();t['days'][0].update(start=800,end=900)
+    first=client.post('/api/v1/planner/preview',json={'trip':t});assert first.status_code==200
+    assert len([i for i in first.json()['issues'] if i['severity']=='error'])>=2
+    t['days'][0]['start']-=15
+    second=client.post('/api/v1/planner/preview',json={'trip':t});assert second.status_code==200
+    assert any(i['options'] for i in second.json()['issues'])
+    assert second.json()['routes']['0']['legs'][0]['minutes']==100
+    assert client.get('/api/v1/trips/'+t['id']).status_code==404
+
+def test_existing_confirmation_retry_uses_normalized_revision(client,monkeypatch):
+    register(client)
+    async def roads(body):return fast_roads(body)
+    monkeypatch.setattr(app.state.router,'route',roads)
+    t=trip();assert client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0}).status_code==200
+    t['title']='new title'  # Incoming proposal still has its base revision, as in the UI.
+    payload={'trip':t,'baseRevision':1}
+    assert client.post('/api/v1/planner/confirm',json=payload).status_code==200
+    replay=client.post('/api/v1/planner/confirm',json=payload)
+    assert replay.status_code==200 and replay.json()['idempotent'] is True
+    assert len(client.get('/api/v1/trips/'+t['id']+'/versions').json())==2
+
+def test_return_constraint_cannot_be_removed_by_confirmation(client):
+    register(client);t=trip();t['days'][0]['activities']=[{'id':'return','placeId':'station','duration':15,'lock':'fixed','fixedStart':1020}]
+    t['requirements']={'city':'杭州','startDate':'2026-11-07','days':1,'people':2,'mode':'walk','destinationPlaceId':'station','returnBy':1020}
+    assert client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0}).status_code==200
+    t.pop('requirements')
+    r=client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':1})
+    assert r.status_code==422 and r.json()['detail']['code']=='return_constraint_changed'
+
+def test_meal_check_counts_transfers_and_fixed_lateness_cascades():
+    from backend.planning import evaluate
+    import backend.app as module
+    t=trip();t['days'][0].update(start=660,end=1000)
+    t['days'][0]['activities']=[{'id':'a','placeId':'quyuan','duration':30,'lock':'none'}, {'id':'b','placeId':'museum','duration':30,'lock':'none'}]
+    routes={0:{'source':'osrm','legs':[{'minutes':120,'distance':8}]}}
+    assert any(i['code']=='meal_break' for i in evaluate(Trip.model_validate(t),routes,module.POIS))
+    t['days'][0]['start']=800;t['days'][0]['end']=1000
+    t['days'][0]['activities'][1].update(lock='fixed',fixedStart=780)
+    t['days'][0]['activities'].append({'id':'c','placeId':'baidi','duration':90,'lock':'none'})
+    routes[0]['legs'].append({'minutes':10,'distance':1})
+    result=evaluate(Trip.model_validate(t),routes,module.POIS)
+    assert any(i['code']=='day_overflow' and i['activityId']=='c' for i in result)
+
+@pytest.mark.parametrize('variant',['late','after_return'])
+def test_return_checks_destination_arrival_and_final_position(client,monkeypatch,variant):
+    register(client)
+    async def roads(body):return {'source':'osrm','legs':[{'minutes':100,'distance':5} for _ in body.placeIds[1:]]}
+    monkeypatch.setattr(app.state.router,'route',roads)
+    t=trip();t['requirements']={'city':'杭州','startDate':'2026-11-07','days':1,'people':2,'mode':'walk','destinationPlaceId':'station','returnBy':1020}
+    t['days'][0]['activities']=[{'id':'a','placeId':'quyuan','duration':60,'lock':'none'},{'id':'return','placeId':'station','duration':15,'lock':'fixed','fixedStart':1020}]
+    if variant=='late':t['days'][0]['start']=900
+    else:t['days'][0]['activities'].append({'id':'b','placeId':'museum','duration':15,'lock':'none'})
+    r=client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0});assert r.status_code==422
+    assert ('return_deadline' if variant=='late' else 'return_not_final') in {i['code'] for i in r.json()['detail']['issues']}
+
+def test_groq_health_requires_groq_key_not_previous_provider(client,monkeypatch):
+ monkeypatch.setenv('PLANNER_MODE','auto');monkeypatch.setenv('MODEL_BASE_URL','https://api.groq.com/openai/v1')
+ monkeypatch.setenv('MODEL_NAME','openai/gpt-oss-20b');monkeypatch.setenv('MODEL_API_KEY','old-glm-key')
+ monkeypatch.delenv('GROQ_API_KEY',raising=False)
+ assert client.get('/api/v1/health').json()['model'] is False
+ monkeypatch.setenv('GROQ_API_KEY','test-groq-key')
+ assert client.get('/api/v1/health').json()['model'] is True
+
+def alternative_body():
+ return {'title':'方案比较','requirements':{'city':'杭州','startDate':'2026-11-14','days':1,'people':2,'mode':'walk','start':540,'end':1110},'candidateIds':['quyuan','museum','art','leifeng'],'optionalIds':['art','leifeng'],'useModel':False}
+
+def test_alternatives_are_read_only_and_confirm_keeps_required_places(client,monkeypatch):
+ register(client)
+ async def roads(body):return {'source':'amap','crs':'GCJ02','legs':[{'minutes':10,'distance':.6,'segments':[{'mode':'walk','minutes':10,'distance':.6}]} for _ in body.placeIds[1:]]}
+ monkeypatch.setattr(app.state.router,'route',roads)
+ r=client.post('/api/v1/planner/alternatives',json=alternative_body());assert r.status_code==200,r.text
+ data=r.json();assert len(data['options'])==3;assert data['source']=='constraint-search'
+ option=data['options'][0];t=option['trip']
+ assert set(t['requirements']['mustVisitIds'])=={'quyuan','museum'}
+ assert client.get('/api/v1/trips/'+t['id']).status_code==404
+ assert client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0}).status_code==200
+ saved=client.get('/api/v1/trips/'+t['id']).json();assert saved['requirements']['mustVisitIds']==t['requirements']['mustVisitIds']
+ changed=copy.deepcopy(t);changed['requirements']['mustVisitIds']=[]
+ assert client.post('/api/v1/planner/confirm',json={'trip':changed,'baseRevision':1}).status_code==422
+ missing=copy.deepcopy(t);missing['id']=str(uuid.uuid4());missing['days'][0]['activities']=[a for a in missing['days'][0]['activities'] if a['placeId']!='quyuan']
+ result=client.post('/api/v1/planner/confirm',json={'trip':missing,'baseRevision':0})
+ assert result.status_code==422 and 'must_visit_missing' in [i['code'] for i in result.json()['detail']['issues']]
+
+def test_alternatives_require_login_and_validate_optional_subset(client):
+ assert client.post('/api/v1/planner/alternatives',json=alternative_body()).status_code==401
+ register(client);body=alternative_body();body['optionalIds']=['not-confirmed']
+ assert client.post('/api/v1/planner/alternatives',json=body).status_code==422
+
+def test_alternatives_report_provider_failure_without_feasible_options(client,monkeypatch):
+ from fastapi import HTTPException
+ register(client);calls=[]
+ async def failed(body):calls.append(1);raise HTTPException(429,'地图预算已满')
+ monkeypatch.setattr(app.state.router,'route',failed)
+ r=client.post('/api/v1/planner/alternatives',json=alternative_body());assert r.status_code==200
+ data=r.json();assert not data['options'];assert data['search']['limited'];assert len(calls)==1

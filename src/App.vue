@@ -23,7 +23,11 @@ const routeReady=computed(()=>routeState.value.status==='ready'||entries.value.l
 const checkedDays=computed(()=>trip.value.days.filter((d,i)=>d.activities.length<2||roadRoutes.value[routeKey(trip.value,i)]).length)
 const currentRoadRoute=computed(()=>roadRoutes.value[routeKey(trip.value,dayIndex.value)])
 const dayWalk=computed(()=>walkingKm(currentRoadRoute.value,trip.value.mode))
-const routeFreshness=computed(()=>currentRoadRoute.value?freshness(currentRoadRoute.value):null)
+const now=ref(Date.now())
+let freshnessTimer:ReturnType<typeof setInterval>|undefined
+onMounted(()=>{freshnessTimer=setInterval(()=>now.value=Date.now(),1000)})
+onUnmounted(()=>clearInterval(freshnessTimer))
+const routeFreshness=computed(()=>currentRoadRoute.value?freshness(currentRoadRoute.value,now.value):null)
 const mixedRoute=computed(()=>currentRoadRoute.value?.source==='amap')
 const selectedEntry=computed(()=>entries.value.find(e=>e.activity.id===selected.value))
 const allIssues=computed(()=>validate(trip.value,roadRoutes.value)),errors=computed(()=>allIssues.value.filter(x=>x.severity==='error'))

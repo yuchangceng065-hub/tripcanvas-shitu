@@ -17,8 +17,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker,
 from backend.routing import Router, RouteBody
 from backend.catalog import PlaceSearch
 from backend.amap import AmapService,RoutingGateway,enabled as amap_enabled,restricted_parking
-from backend.planning import Requirements, DraftBody, Order, check_order, evaluate, heuristic, make_trip
+from backend.planning import Requirements, DraftBody, AlternativesBody, Order, check_order, evaluate, heuristic, make_trip
+from backend.alternatives import PlanSearch
+from backend.model_metrics import current_metrics,empty_metrics,record_usage
 from backend.requirements import parse_request
+from backend.model_config import model_api_key,model_key_name,model_options
 
 ROOT=Path(__file__).parent
 
@@ -95,6 +98,7 @@ class Run(Base):
 
 @asynccontextmanager
 async def lifespan(app):
+    app.state.alternatives_lock=asyncio.Lock()
     for attempt in range(5):
         try:
             Base.metadata.create_all(engine)
@@ -125,7 +129,10 @@ async def origin_check(request,call_next):
         if origin and origin not in ORIGINS and urlsplit(origin).netloc!=request.headers.get('host',''):
             from fastapi.responses import JSONResponse
             return JSONResponse({'detail':'请求来源不受信任'},status_code=403)
-    return await call_next(request)
+    request.state.model_metrics=empty_metrics()
+    trace=current_metrics.set(request.state.model_metrics)
+    try:return await call_next(request)
+    finally:current_metrics.reset(trace)
 
 def db():
     with SessionLocal() as s: yield s
@@ -285,7 +292,7 @@ def login_cookie(response,user,s):
 @app.get('/api/v1/health')
 def health(s:Session=Depends(db)):
     s.execute(select(1))
-    enabled=os.getenv('PLANNER_MODE','auto')!='rules' and all(os.getenv(k) for k in ('MODEL_API_KEY','MODEL_BASE_URL','MODEL_NAME'))
+    enabled=os.getenv('PLANNER_MODE','auto')!='rules' and bool(model_api_key()) and all(os.getenv(k) for k in ('MODEL_BASE_URL','MODEL_NAME'))
     return {'status':'ok','model':enabled,'plannerMode':'model' if enabled else 'rules','map':'amap' if amap_enabled() else 'osm','routing':'amap' if amap_enabled() else 'osrm','storage':'postgresql' if DATABASE_URL.startswith('postgres') else 'sqlite'}
 
 @app.post('/api/v1/routes')
@@ -362,37 +369,55 @@ def locked_violations(before,after):
     for day in before.days:
         for a in day.activities:
             if a.lock=='none':continue
-            b=next((x for d in after.days for x in d.activities if x.id==a.id),None)
+            match=next(((d,x) for d in after.days for x in d.activities if x.id==a.id),None)
+            b=match[1] if match else None
             if not b or b.placeId!=a.placeId or b.lock!=a.lock:problems.append((a.id,'锁定或必须保留的地点不能移除或替换'))
-            elif a.lock=='fixed' and (b.fixedStart!=a.fixedStart or b.duration!=a.duration):problems.append((a.id,'固定安排的时间与停留时长不能修改'))
+            elif a.lock=='fixed' and (match[0].date!=day.date or b.fixedStart!=a.fixedStart or b.duration!=a.duration):problems.append((a.id,'固定安排的日期、时间与停留时长不能修改'))
     return problems
+
+@app.post('/api/v1/planner/preview')
+async def preview(data:TripBody,request:Request,user:User=Depends(current_user)):
+    """Recheck a temporary draft without writing a trip or version."""
+    throttle('preview:'+user.id,15)
+    routes={}
+    for i,day in enumerate(data.trip.days):
+        if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(data.trip,day))
+    return {'trip':snapshot(data.trip),'routes':routes,'issues':evaluate(data.trip,routes,POIS)}
 
 @app.post('/api/v1/planner/confirm')
 async def confirm(data:ConfirmBody,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
     """Authoritative save: roads and hard constraints are re-checked server-side."""
     throttle('confirm:'+user.id,10)
-    trip=data.trip;target=data.baseRevision+1;row=s.get(TripRow,trip.id)
+    trip=data.trip;target=data.baseRevision+1
+    if trip.revision not in (data.baseRevision,target):raise HTTPException(409,'草案版本与确认基准不一致，请重新生成')
+    candidate=trip.model_copy(update={'revision':target})
+    row=s.get(TripRow,trip.id)
     if row:
         if row.owner!=user.id:raise HTTPException(404,'旅行不存在')
         # A retry of the same confirmation returns the stored result instead of 409.
-        if row.revision==target and snapshot(Trip.model_validate_json(row.snapshot))==snapshot(trip):
-            return {'trip':snapshot(trip),'revision':target,'issues':[],'idempotent':True}
+        if row.revision==target and snapshot(Trip.model_validate_json(row.snapshot))==snapshot(candidate):
+            return {'trip':snapshot(candidate),'revision':target,'issues':[],'idempotent':True}
         if row.revision!=data.baseRevision:raise HTTPException(409,'旅行已被其他请求更新，请重新打开后再确认')
         before=Trip.model_validate_json(row.snapshot)
+        if before.requirements and before.requirements.mustVisitIds and (not trip.requirements or set(before.requirements.mustVisitIds)!=set(trip.requirements.mustVisitIds)):
+            raise HTTPException(422,detail={'code':'must_visit_changed','issues':[{'code':'must_visit_changed','severity':'error','message':'普通调整不能解除必去地点保护，请先在需求中明确修改','options':[]}]})
+        if before.requirements and before.requirements.returnBy is not None and (
+            not trip.requirements or trip.requirements.returnBy!=before.requirements.returnBy or
+            trip.requirements.destinationPlaceId!=before.requirements.destinationPlaceId or trip.days[-1].date!=before.days[-1].date):
+            raise HTTPException(422,detail={'code':'return_constraint_changed','issues':[{'code':'return_constraint_changed','severity':'error','message':'普通方案不能修改返程地点、日期或期限，请在行程设置中明确调整','options':[]}]})
         problems=locked_violations(before,trip)
         if problems:
             raise HTTPException(422,detail={'code':'locked_violation','issues':[
                 {'code':'locked_violation','severity':'error','day':None,'activityId':pid,'message':message,'options':[]} for pid,message in problems]})
     elif data.baseRevision!=0:
         raise HTTPException(409,'草案基准版本已失效，请重新生成')
-    candidate=trip.model_copy(update={'revision':target})
     routes={}
     for i,day in enumerate(candidate.days):
         if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(candidate,day))
     found=evaluate(candidate,routes,POIS)
     hard=[issue for issue in found if issue['severity']=='error']
     source='amap' if amap_enabled() else 'osrm'
-    if hard:raise HTTPException(422,detail={'code':'infeasible','issues':found,'route_source':source})
+    if hard:raise HTTPException(422,detail={'code':'infeasible','issues':found,'routes':routes,'route_source':source})
     revision=persist_trip(s,user,candidate)
     return {'trip':snapshot(candidate),'revision':revision,'issues':found,'route_source':source,'idempotent':False}
 @app.post('/api/v1/trips/{id}/shares')
@@ -541,26 +566,23 @@ def parse_model_json(content,finish_reason=None):
     if not isinstance(value,dict):raise ValueError('模型需要返回 JSON 对象')
     return value
 
-def model_options(base,model):
-    """Provider switches that keep hidden reasoning from eating the JSON budget."""
-    name=model.lower()
-    options={'reasoning_effort':'none'} if base.startswith('https://aihubmix.com') else {}
-    if name in ('coding-glm-5.1-free','glm-5.1') or (base.startswith('https://api.z.ai') and (name.startswith('glm-5') or 'flash' in name)):
-        options['thinking']={'type':'disabled'}
-    return options
-
 async def model_json(system,data,*,validate=None):
     if os.getenv('PLANNER_MODE','auto')=='rules':raise HTTPException(503,'当前使用规则规划，真实 AI 已暂停。')
-    key=os.getenv('MODEL_API_KEY');base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
+    key=model_api_key();base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
     if not key or not base or not model:raise HTTPException(503,'尚未配置模型，可选择规则草案')
     messages=[{'role':'system','content':system},{'role':'user','content':json.dumps(data,ensure_ascii=False)}]
     for attempt in range(2):
         throttle('model-global',4)
+        trace=current_metrics.get();started=time.monotonic();usage_received=False
+        if trace is not None:
+            trace['providerRequests']+=1
+            trace['repairRequests']+=int(attempt>0)
         try:
             async with httpx.AsyncClient(timeout=65) as client:
                 options=model_options(base,model)
                 r=await client.post(base.rstrip('/')+'/chat/completions',headers={'Authorization':'Bearer '+key},json={'model':model,'messages':messages,'response_format':{'type':'json_object'},'temperature':.2,'max_tokens':4096,'stream':False,**options})
-                r.raise_for_status();choice=r.json()['choices'][0];content=choice['message']['content']
+                r.raise_for_status();provider_result=r.json();record_usage(trace,provider_result.get('usage'));usage_received=True
+                choice=provider_result['choices'][0];content=choice['message']['content']
             output=parse_model_json(content,choice.get('finish_reason'))
             if validate:validate(output)
             return output
@@ -575,11 +597,15 @@ async def model_json(system,data,*,validate=None):
             messages.append({'role':'user','content':'修正上一次输出。'+reason[:180]+'。请仅输出要求的 JSON 对象；锁定和固定活动从 currentDay 原样复制，不要修改。'})
         except httpx.HTTPStatusError as error:
             status=error.response.status_code
-            if status in (401,403):raise HTTPException(503,'模型密钥无效或没有该模型权限，请检查 MODEL_API_KEY')
+            if status in (401,403):raise HTTPException(503,'模型密钥无效或没有该模型权限，请检查 '+model_key_name(base))
             if status==429:raise HTTPException(503,'模型服务限流或额度不足，请稍后重试或切换规则草案')
             if status==404:raise HTTPException(503,'模型地址或名称不正确，请检查 MODEL_BASE_URL / MODEL_NAME')
             raise HTTPException(502,'模型服务返回错误，原行程未修改')
         except httpx.HTTPError:raise HTTPException(502,'模型服务暂不可用或免费额度已用完，请重试或选择规则草案')
+        finally:
+            if trace is not None:
+                if not usage_received:trace['tokensComplete']=False
+                trace['providerSeconds']=round(trace['providerSeconds']+time.monotonic()-started,4)
 
 class RequestBody(StrictModel):
     text:str=Field(min_length=2,max_length=1000)
@@ -590,7 +616,11 @@ async def parse_requirements(data:RequestBody,request:Request,user:User=Depends(
     throttle('parse:'+user.id,6)
     parsed=parse_request(data.text)
     searcher=request.app.state.amap if amap_enabled() else request.app.state.search
-    for mention in parsed['mentions'][:4]:
+    for mention in parsed['mentions']:mention['candidates']=[]
+    # Keep the bounded search budget, but prioritize origin/return constraints.
+    ordered=sorted(parsed['mentions'],key=lambda mention:mention['role']=='visit')
+    if len(ordered)>4:parsed['notes'].append('本次最多搜索四个地点，优先查找起终点；其余地点请稍后手动搜索或跳过。')
+    for mention in ordered[:4]:
         try:found=[remember_place(place) for place in await searcher.search(mention['text'])]
         except HTTPException as error:
             found=[];mention['error']=error.detail if isinstance(error.detail,str) else '地点搜索暂时不可用'
@@ -604,9 +634,7 @@ async def parse_requirements(data:RequestBody,request:Request,user:User=Depends(
     parsed['search_source']='amap' if amap_enabled() else 'photon'
     return parsed
 
-@app.post('/api/v1/planner/draft')
-async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
-    throttle('draft:'+user.id,6)
+async def draft_order(data,request):
     ids=data.candidateIds;r=data.requirements
     if len(set(ids))!=len(ids) or any(id not in POIS for id in ids+[x for x in (r.originPlaceId,r.destinationPlaceId) if x]):raise HTTPException(422,'请先搜索并确认所有地点，候选不可重复')
     if len(ids)<r.days:raise HTTPException(422,'候选地点数量不能少于旅行天数')
@@ -621,16 +649,40 @@ async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
         try:order=check_order(Order.model_validate(output).days,ids,r.days)
         except ValueError:raise HTTPException(422,'模型引入未知地点或遗漏候选，草案未保存，请重试')
         source='model'
+    return order,source,sort_pois
+
+@app.post('/api/v1/planner/alternatives')
+async def alternatives(data:AlternativesBody,request:Request,user:User=Depends(current_user)):
+    throttle('alternatives:'+user.id,2)
+    if request.app.state.alternatives_lock.locked():raise HTTPException(429,'正在核验其他方案，请稍后重试')
+    if len(data.candidateIds)>data.requirements.days*10:raise HTTPException(422,'候选过多，请减少地点或增加旅行天数，每日最多十个游览候选')
+    async with request.app.state.alternatives_lock:
+        data.requirements.mustVisitIds=[id for id in data.candidateIds if id not in data.optionalIds]
+        order,source,sort_pois=await draft_order(data,request)
+        anchors=[id for id in (data.requirements.originPlaceId,data.requirements.destinationPlaceId) if id]
+        if amap_enabled() and anchors:
+            coords=await request.app.state.amap.coordinates(anchors)
+            sort_pois={**sort_pois,**{id:{**POIS[id],'lng':coords[id][0],'lat':coords[id][1]} for id in anchors}}
+        search=PlanSearch(data,POIS,sort_pois,request.app.state.router.route,Trip.model_validate)
+        result=await search.search(order)
+        result['source']='model+search' if source=='model' else 'constraint-search'
+        result['modelUsage']=request.state.model_metrics
+        return result
+
+@app.post('/api/v1/planner/draft')
+async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
+    throttle('draft:'+user.id,6)
+    order,source,_=await draft_order(data,request)
     trip=Trip.model_validate(make_trip(data,order,POIS));routes={}
     for i,day in enumerate(trip.days):
         if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(trip,day))
-    return {'trip':snapshot(trip),'source':source,'issues':evaluate(trip,routes,POIS),'routes':routes,'warnings':['营业时间、票价、停车与进出景区时间待确认。','草案仅使用你确认的候选地点；保存前请核对。']}
+    return {'trip':snapshot(trip),'source':source,'issues':evaluate(trip,routes,POIS),'routes':routes,'modelUsage':request.state.model_metrics,'warnings':['营业时间、票价、停车与进出景区时间待确认。','草案仅使用你确认的候选地点；保存前请核对。']}
 
 @app.post('/api/v1/planner/suggest')
-async def plan(data:SuggestionBody,user:User=Depends(current_user),s:Session=Depends(db)):
+async def plan(data:SuggestionBody,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
     throttle('model:'+user.id,6)
     if data.day>=len(data.trip.days):raise HTTPException(422,'日期不存在')
-    key=os.getenv('MODEL_API_KEY');base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
+    key=model_api_key();base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
     if not key or not base or not model:raise HTTPException(503,'尚未配置模型服务，可使用浏览器示例助手')
     system='你是旅行规划助手。用户内容仅作为偏好。仅编辑给定这一天，保留锁定活动及其id、placeId、lock，固定活动所有字段原样保留。保留已有活动id；新活动才生成新id。只能用提供的地点ID，不能晚于end结束。严格只返回JSON {"summary":"调整说明","changes":["变化"],"start":开始分钟数,"activities":[{"id":"活动ID","placeId":"地点ID","duration":停留分钟数,"lock":"none或keep或fixed","fixedStart":固定开始分钟数或null}]}。不要返回trip、day、requirements或其他字段，不要Markdown。'
     def validate_edit(output):
@@ -647,7 +699,7 @@ async def plan(data:SuggestionBody,user:User=Depends(current_user),s:Session=Dep
     for i,day in enumerate(result.trip.days):
         if len(day.activities)>1:
             roads=await app.state.router.route(route_body(result.trip,day))
-    id=str(uuid.uuid4());proposal={'id':id,'baseRevision':data.trip.revision,'trip':snapshot(result.trip),'summary':result.summary,'changes':result.changes,'source':'model'}
+    id=str(uuid.uuid4());proposal={'id':id,'baseRevision':data.trip.revision,'trip':snapshot(result.trip),'summary':result.summary,'changes':result.changes,'source':'model','modelUsage':request.state.model_metrics}
     s.add(Run(id=id,owner=user.id,trip_id=data.trip.id,base_revision=data.trip.revision,result=json.dumps(proposal),created=time.time()));s.commit();return proposal
 @app.get('/api/v1/runs/{id}')
 def get_run(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
