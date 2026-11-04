@@ -1,32 +1,26 @@
 """TripCanvas API. SQLite for local development; PostgreSQL via DATABASE_URL."""
 from __future__ import annotations
-import asyncio, hashlib, hmac, json, logging, math, os, re, secrets, time, uuid
+import asyncio, hashlib, json, logging, math, os, re, secrets, time, uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, Request, Response
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from backend.routing import Router, RouteBody
 from backend.catalog import PlaceSearch
 from backend.amap import AmapService,RoutingGateway,enabled as amap_enabled,restricted_parking
-from backend.planning import DraftBody, AlternativesBody, Order, check_order, evaluate, heuristic, make_trip
-from backend.alternatives import PlanSearch
+from backend.planning import Order, check_order, heuristic
 from backend.model_metrics import current_metrics,empty_metrics,record_usage
-from backend.requirements import parse_request
 from backend.model_config import model_api_key,model_key_name,model_options
-from backend.runlog import RunRecorder, events_for, run_payload
 
-from backend.db import (DATABASE_URL, engine, SessionLocal, Base, User, AuthSession, TripRow,
-                        VersionRow, Share, PlaceRecord, ProviderUsage, Run)
-from backend.places import PLACES, POIS
-from backend.schemas import (Credentials, Trip, TripBody,
-                             ConfirmBody, SuggestionBody, ModelResult, DayEdit, CoordinatesBody,
-                             RequestBody)
+from backend.db import (engine, SessionLocal, Base, User, AuthSession, TripRow,
+                        VersionRow, PlaceRecord, ProviderUsage)
+from backend.places import POIS
+from backend.schemas import (Trip)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -173,45 +167,10 @@ def login_cookie(response,user,s):
     response.headers['Cache-Control']='no-store'
     return {'username':user.username,'access_token':token,'token_type':'bearer'}
 
-@app.get('/api/v1/health')
-def health(s:Session=Depends(db)):
-    s.execute(select(1))
-    enabled=os.getenv('PLANNER_MODE','auto')!='rules' and bool(model_api_key()) and all(os.getenv(k) for k in ('MODEL_BASE_URL','MODEL_NAME'))
-    return {'status':'ok','model':enabled,'plannerMode':'model' if enabled else 'rules','map':'amap' if amap_enabled() else 'osm','routing':'amap' if amap_enabled() else 'osrm','storage':'postgresql' if DATABASE_URL.startswith('postgres') else 'sqlite','commit':COMMIT[:12] or None}
-
-@app.post('/api/v1/routes')
-async def roads(data:RouteBody,request:Request,user:User|None=Depends(optional_user)):
-    if user:throttle('route:'+user.id,30)
-    else:
-        throttle('route:'+client_ip(request),10)
-        reserve_anonymous('route',40)
-    return await request.app.state.router.route(data)
-@app.post('/api/v1/auth/register')
-def register(data:Credentials,response:Response,request:Request,s:Session=Depends(db)):
-    throttle('auth:'+client_ip(request),8)
-    if s.scalar(select(User).where(User.username==data.username)):raise HTTPException(409,'用户名已存在')
-    user=User(id=str(uuid.uuid4()),username=data.username,password=password_hash(data.password));s.add(user);s.commit();return login_cookie(response,user,s)
-@app.post('/api/v1/auth/login')
-def login(data:Credentials,response:Response,request:Request,s:Session=Depends(db)):
-    throttle('auth:'+client_ip(request),8)
-    user=s.scalar(select(User).where(User.username==data.username))
-    if not user or not hmac.compare_digest(password_hash(data.password,user.password.split(':')[0]),user.password):raise HTTPException(401,'用户名或密码不正确')
-    return login_cookie(response,user,s)
-@app.post('/api/v1/auth/logout')
-def logout(request:Request,response:Response,s:Session=Depends(db)):
-    token=session_token(request);s.execute(delete(AuthSession).where(AuthSession.token==hashlib.sha256(token.encode()).hexdigest()));s.commit();response.delete_cookie('tripcanvas_session');return {'ok':True}
-@app.get('/api/v1/auth/me')
-def me(user:User=Depends(current_user)):return {'username':user.username}
-@app.get('/api/v1/trips')
-def list_trips(user:User=Depends(current_user),s:Session=Depends(db)):
-    return [json.loads(t.snapshot) for t in s.scalars(select(TripRow).where(TripRow.owner==user.id))]
 def owned(s,id,user):
     t=s.get(TripRow,id)
     if not t or t.owner!=user.id:raise HTTPException(404,'旅行不存在')
     return t
-@app.get('/api/v1/trips/{id}')
-def get_trip(id:str,user:User=Depends(current_user),s:Session=Depends(db)):return json.loads(owned(s,id,user).snapshot)
-
 def persist_trip(s,user,trip):
     """Idempotent write used by both manual sync and the confirm transaction."""
     raw=json.dumps(snapshot(trip),ensure_ascii=False,sort_keys=True);row=s.get(TripRow,trip.id)
@@ -226,28 +185,6 @@ def persist_trip(s,user,trip):
     else:s.add(TripRow(id=trip.id,owner=user.id,revision=trip.revision,snapshot=raw))
     s.add(VersionRow(id=str(uuid.uuid4()),trip_id=trip.id,revision=trip.revision,snapshot=raw,created=time.time()));s.commit();return trip.revision
 
-@app.put('/api/v1/trips/{id}')
-def save_trip(id:str,data:TripBody,user:User=Depends(current_user),s:Session=Depends(db)):
-    if id!=data.trip.id:raise HTTPException(422,'旅行 ID 不一致')
-    return {'id':id,'revision':persist_trip(s,user,data.trip)}
-@app.delete('/api/v1/trips/{id}')
-def delete_trip(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
-    t=owned(s,id,user)
-    for model in (Share,VersionRow,Run):s.execute(delete(model).where(model.trip_id==id))
-    s.delete(t);s.commit();return {'ok':True}
-@app.get('/api/v1/trips/{id}/versions')
-def versions(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
-    owned(s,id,user);return [{'id':v.id,'revision':v.revision,'trip':json.loads(v.snapshot)} for v in s.scalars(select(VersionRow).where(VersionRow.trip_id==id).order_by(VersionRow.created.desc()))]
-@app.post('/api/v1/trips/{id}/validate')
-async def check_plan(id:str,data:TripBody,request:Request,user:User=Depends(current_user)):
-    if id!=data.trip.id:raise HTTPException(422,'旅行 ID 不一致')
-    throttle('validate:'+user.id,15)
-    routes={}
-    for i,day in enumerate(data.trip.days):
-        if len(day.activities)>1:
-            routes[i]=await request.app.state.router.route(route_body(data.trip,day))
-    return {'issues':evaluate(data.trip,routes,POIS),'route_source':'amap' if amap_enabled() else 'osrm','opening_hours':'unknown'}
-
 def locked_violations(before,after):
     problems=[]
     for day in before.days:
@@ -258,69 +195,6 @@ def locked_violations(before,after):
             if not b or b.placeId!=a.placeId or b.lock!=a.lock:problems.append((a.id,'锁定或必须保留的地点不能移除或替换'))
             elif a.lock=='fixed' and (match[0].date!=day.date or b.fixedStart!=a.fixedStart or b.duration!=a.duration):problems.append((a.id,'固定安排的日期、时间与停留时长不能修改'))
     return problems
-
-@app.post('/api/v1/planner/preview')
-async def preview(data:TripBody,request:Request,user:User=Depends(current_user)):
-    """Recheck a temporary draft without writing a trip or version."""
-    throttle('preview:'+user.id,15)
-    routes={}
-    for i,day in enumerate(data.trip.days):
-        if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(data.trip,day))
-    return {'trip':snapshot(data.trip),'routes':routes,'issues':evaluate(data.trip,routes,POIS)}
-
-@app.post('/api/v1/planner/confirm')
-async def confirm(data:ConfirmBody,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
-    """Authoritative save: roads and hard constraints are re-checked server-side."""
-    throttle('confirm:'+user.id,10)
-    trip=data.trip;target=data.baseRevision+1
-    if trip.revision not in (data.baseRevision,target):raise HTTPException(409,'草案版本与确认基准不一致，请重新生成')
-    candidate=trip.model_copy(update={'revision':target})
-    row=s.get(TripRow,trip.id)
-    if row:
-        if row.owner!=user.id:raise HTTPException(404,'旅行不存在')
-        # A retry of the same confirmation returns the stored result instead of 409.
-        if row.revision==target and snapshot(Trip.model_validate_json(row.snapshot))==snapshot(candidate):
-            return {'trip':snapshot(candidate),'revision':target,'issues':[],'idempotent':True}
-        if row.revision!=data.baseRevision:raise HTTPException(409,'旅行已被其他请求更新，请重新打开后再确认')
-        before=Trip.model_validate_json(row.snapshot)
-        if before.requirements and before.requirements.mustVisitIds and (not trip.requirements or set(before.requirements.mustVisitIds)!=set(trip.requirements.mustVisitIds)):
-            raise HTTPException(422,detail={'code':'must_visit_changed','issues':[{'code':'must_visit_changed','severity':'error','message':'普通调整不能解除必去地点保护，请先在需求中明确修改','options':[]}]})
-        if before.requirements and before.requirements.returnBy is not None and (
-            not trip.requirements or trip.requirements.returnBy!=before.requirements.returnBy or
-            trip.requirements.destinationPlaceId!=before.requirements.destinationPlaceId or trip.days[-1].date!=before.days[-1].date):
-            raise HTTPException(422,detail={'code':'return_constraint_changed','issues':[{'code':'return_constraint_changed','severity':'error','message':'普通方案不能修改返程地点、日期或期限，请在行程设置中明确调整','options':[]}]})
-        problems=locked_violations(before,trip)
-        if problems:
-            raise HTTPException(422,detail={'code':'locked_violation','issues':[
-                {'code':'locked_violation','severity':'error','day':None,'activityId':pid,'message':message,'options':[]} for pid,message in problems]})
-    elif data.baseRevision!=0:
-        raise HTTPException(409,'草案基准版本已失效，请重新生成')
-    routes={}
-    for i,day in enumerate(candidate.days):
-        if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(candidate,day))
-    found=evaluate(candidate,routes,POIS)
-    hard=[issue for issue in found if issue['severity']=='error']
-    source='amap' if amap_enabled() else 'osrm'
-    if hard:raise HTTPException(422,detail={'code':'infeasible','issues':found,'routes':routes,'route_source':source})
-    revision=persist_trip(s,user,candidate)
-    return {'trip':snapshot(candidate),'revision':revision,'issues':found,'route_source':source,'idempotent':False}
-@app.post('/api/v1/trips/{id}/shares')
-def share(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
-    t=owned(s,id,user);token=secrets.token_urlsafe(24);share_id=str(uuid.uuid4())
-    public=Trip.model_validate_json(t.snapshot).model_dump(mode='json',exclude_none=True)
-    # Only schema-approved public POIs and fields are present. No user/account data.
-    s.add(Share(id=share_id,token=hashlib.sha256(token.encode()).hexdigest(),owner=user.id,trip_id=id,snapshot=json.dumps(public),expires=time.time()+86400*30));s.commit();return {'id':share_id,'token':token,'expires_in_days':30}
-@app.delete('/api/v1/shares/{id}')
-def revoke(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
-    row=s.get(Share,id)
-    if not row or row.owner!=user.id:raise HTTPException(404,'链接不存在')
-    s.delete(row);s.commit();return {'ok':True}
-@app.get('/api/v1/public/shares/{token}')
-def public_share(token:str,response:Response,s:Session=Depends(db)):
-    response.headers['Cache-Control']='no-store'
-    row=s.scalar(select(Share).where(Share.token==hashlib.sha256(token.encode()).hexdigest()))
-    if not row or row.expires<time.time():raise HTTPException(404,'分享链接不存在或已撤销')
-    return json.loads(row.snapshot)
 
 def remember_place(place):
     known=POIS.get(place['id'])
@@ -379,66 +253,6 @@ def reserve_amap_usage(category):
 def route_body(trip,day):
     return RouteBody(mode=trip.mode,placeIds=[a.placeId for a in day.activities],**(trip.mobility.model_dump() if trip.mobility else {}))
 
-@app.get('/api/v1/places/search')
-async def search_places(request:Request,q:str='',s:Session=Depends(db),user:User|None=Depends(optional_user)):
-    q=q.strip()
-    if not 2<=len(q)<=100:raise HTTPException(422,'请输入 2—100 个字符的地点名称')
-    if user:throttle('search:'+user.id,20)
-    else:
-        throttle('search:'+client_ip(request),8)
-        reserve_anonymous('search',80)
-    source='amap' if amap_enabled() else 'photon'
-    found=await (request.app.state.amap.search(q) if amap_enabled() else request.app.state.search.search(q))
-    found=[remember_place(p) for p in found]
-    return {'source':source,'places':found,'attribution':'高德地图' if source=='amap' else '© OpenStreetMap contributors / Photon'}
-
-@app.get('/api/v1/places/{id}/parking')
-async def search_parking(id:str,request:Request,user:User|None=Depends(optional_user)):
-    if id not in POIS:raise HTTPException(404,'地点不存在')
-    if user:throttle('parking:'+user.id,30)
-    else:
-        throttle('parking:'+client_ip(request),10)
-        reserve_anonymous('parking',60)
-    return {'places':await request.app.state.amap.parking(id),'source':'amap'}
-
-@app.post('/api/v1/map/coordinates')
-async def map_coordinates(data:CoordinatesBody,request:Request,user:User|None=Depends(optional_user)):
-    if user:throttle('coordinates:'+user.id,30)
-    else:
-        throttle('coordinates:'+client_ip(request),10)
-        reserve_anonymous('coordinates',60)
-    return {'crs':'GCJ02','locations':await request.app.state.amap.coordinates(data.placeIds)}
-
-@app.get('/api/v1/map/config')
-def map_config(request:Request,user:User|None=Depends(optional_user)):
-    if not amap_enabled():return {'provider':'osm','ready':False}
-    if user:throttle('map:'+user.id,30)
-    else:
-        throttle('map:'+client_ip(request),10)
-        reserve_anonymous('map',200)
-    reserve_amap_usage('map')
-    # Only the domain-restricted public JS key is returned. The security code
-    # and Web-service key remain on the server.
-    origin=os.getenv('PUBLIC_API_ORIGIN') or os.getenv('RENDER_EXTERNAL_URL') or str(request.base_url)
-    return {'provider':'amap','ready':True,'jsKey':os.environ['AMAP_JS_KEY'],'serviceHost':origin.rstrip('/')+'/_AMapService'}
-
-@app.get('/_AMapService/{path:path}')
-async def map_security_proxy(path:str,request:Request):
-    if not amap_enabled() or path!='v4/map/styles':raise HTTPException(404,'地图资源不存在')
-    origin=request.headers.get('origin')
-    if not origin:
-        ref=urlsplit(request.headers.get('referer',''));origin=ref.scheme+'://'+ref.netloc
-    if origin not in ORIGINS:raise HTTPException(403,'地图请求来源不受信任')
-    params=dict(request.query_params)
-    if params.get('key')!=os.environ['AMAP_JS_KEY']:raise HTTPException(403,'地图 Key 不匹配')
-    throttle('map-proxy:'+client_ip(request),60)
-    params['jscode']=os.environ['AMAP_JS_SECURITY_CODE']
-    try:
-        upstream=await request.app.state.http.get('https://webapi.amap.com/v4/map/styles',params=params,headers={'Referer':origin+'/','Origin':origin})
-        if upstream.is_redirect:raise HTTPException(502,'地图资源发生重定向，未转发密钥')
-        return Response(content=upstream.content,status_code=upstream.status_code,media_type=upstream.headers.get('content-type','application/json'),headers={'Cache-Control':'private, max-age=300'})
-    except httpx.HTTPError:raise HTTPException(503,'地图资源暂不可用')
-
 def parse_model_json(content,finish_reason=None):
     if finish_reason=='length':raise ValueError('模型输出被截断')
     if not isinstance(content,str) or not content.strip():raise ValueError('模型未返回正文')
@@ -495,30 +309,6 @@ async def model_json(system,data,*,validate=None):
                 if not usage_received:trace['tokensComplete']=False
                 trace['providerSeconds']=round(trace['providerSeconds']+time.monotonic()-started,4)
 
-@app.post('/api/v1/planner/requirements')
-async def parse_requirements(data:RequestBody,request:Request,user:User=Depends(current_user)):
-    """Extract conditions and real place candidates; nothing is saved or invented."""
-    throttle('parse:'+user.id,6)
-    parsed=parse_request(data.text)
-    searcher=request.app.state.amap if amap_enabled() else request.app.state.search
-    for mention in parsed['mentions']:mention['candidates']=[]
-    # Keep the bounded search budget, but prioritize origin/return constraints.
-    ordered=sorted(parsed['mentions'],key=lambda mention:mention['role']=='visit')
-    if len(ordered)>4:parsed['notes'].append('本次最多搜索四个地点，优先查找起终点；其余地点请稍后手动搜索或跳过。')
-    for mention in ordered[:4]:
-        try:found=[remember_place(place) for place in await searcher.search(mention['text'])]
-        except HTTPException as error:
-            found=[];mention['error']=error.detail if isinstance(error.detail,str) else '地点搜索暂时不可用'
-        mention['candidates']=found[:3]
-    suggestions=[]
-    interests=parsed['requirements'].get('interests') or []
-    if interests:
-        try:suggestions=[remember_place(place) for place in (await searcher.search(interests[0]))[:4]]
-        except HTTPException:pass
-    parsed['suggestions']=suggestions
-    parsed['search_source']='amap' if amap_enabled() else 'photon'
-    return parsed
-
 async def draft_order(data,request):
     ids=data.candidateIds;r=data.requirements
     if len(set(ids))!=len(ids) or any(id not in POIS for id in ids+[x for x in (r.originPlaceId,r.destinationPlaceId) if x]):raise HTTPException(422,'请先搜索并确认所有地点，候选不可重复')
@@ -536,93 +326,8 @@ async def draft_order(data,request):
         source='model'
     return order,source,sort_pois
 
-@app.post('/api/v1/planner/alternatives')
-async def alternatives(data:AlternativesBody,request:Request,user:User=Depends(current_user)):
-    throttle('alternatives:'+user.id,2)
-    if request.app.state.alternatives_lock.locked():raise HTTPException(429,'正在核验其他方案，请稍后重试')
-    reserve_user_daily(user.id,'plans',int(os.getenv('PLAN_DAILY_LIMIT','8')))
-    if len(data.candidateIds)>data.requirements.days*10:raise HTTPException(422,'候选过多，请减少地点或增加旅行天数，每日最多十个游览候选')
-    recorder=RunRecorder(user.id,'',0,'alternatives')
-    try:
-        recorder.event('requirements',detail={'candidates':len(data.candidateIds),'optional':len(data.optionalIds),'days':data.requirements.days})
-        async with request.app.state.alternatives_lock:
-            data.requirements.mustVisitIds=[id for id in data.candidateIds if id not in data.optionalIds]
-            order,source,sort_pois=await draft_order(data,request)
-            recorder.event('model' if source=='model' else 'rules',detail={'usage':request.state.model_metrics})
-            anchors=[id for id in (data.requirements.originPlaceId,data.requirements.destinationPlaceId) if id]
-            if amap_enabled() and anchors:
-                coords=await request.app.state.amap.coordinates(anchors)
-                sort_pois={**sort_pois,**{id:{**POIS[id],'lng':coords[id][0],'lat':coords[id][1]} for id in anchors}}
-            search=PlanSearch(data,POIS,sort_pois,request.app.state.router.route,Trip.model_validate)
-            result=await search.search(order)
-            recorder.event('search',detail=result.get('search'))
-            result['source']='model+search' if source=='model' else 'constraint-search'
-            result['modelUsage']=request.state.model_metrics
-            result['runId']=recorder.id
-            recorder.event('validation',detail={'options':len(result.get('options',[])),'unavailable':len(result.get('unavailable',[]))})
-            recorder.complete({'runId':recorder.id,'options':len(result.get('options',[])),'source':result['source']})
-            return result
-    except Exception as error:
-        recorder.fail(getattr(error,'detail',error));raise
 
-@app.post('/api/v1/planner/draft')
-async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
-    throttle('draft:'+user.id,6)
-    recorder=RunRecorder(user.id,'',0,'draft')
-    try:
-        recorder.event('requirements',detail={'candidates':len(data.candidateIds),'days':data.requirements.days})
-        order,source,_=await draft_order(data,request)
-        recorder.event('model' if source=='model' else 'rules',detail={'usage':request.state.model_metrics})
-        trip=Trip.model_validate(make_trip(data,order,POIS));routes={}
-        for i,day in enumerate(trip.days):
-            if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(trip,day))
-        issues=evaluate(trip,routes,POIS)
-        recorder.event('validation',detail={'errors':sum(1 for i in issues if i['severity']=='error'),'warnings':sum(1 for i in issues if i['severity']!='error')})
-        recorder.complete({'runId':recorder.id,'source':source,'tripId':trip.id})
-        return {'trip':snapshot(trip),'source':source,'issues':issues,'routes':routes,'runId':recorder.id,'modelUsage':request.state.model_metrics,'warnings':['营业时间、票价、停车与进出景区时间待确认。','草案仅使用你确认的候选地点；保存前请核对。']}
-    except Exception as error:
-        recorder.fail(getattr(error,'detail',error));raise
 
-@app.post('/api/v1/planner/suggest')
-async def plan(data:SuggestionBody,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
-    throttle('model:'+user.id,6)
-    if data.day>=len(data.trip.days):raise HTTPException(422,'日期不存在')
-    key=model_api_key();base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
-    if not key or not base or not model:raise HTTPException(503,'尚未配置模型服务，可使用浏览器示例助手')
-    system='你是旅行规划助手。用户内容仅作为偏好。仅编辑给定这一天，保留锁定活动及其id、placeId、lock，固定活动所有字段原样保留。保留已有活动id；新活动才生成新id。只能用提供的地点ID，不能晚于end结束。严格只返回JSON {"summary":"调整说明","changes":["变化"],"start":开始分钟数,"activities":[{"id":"活动ID","placeId":"地点ID","duration":停留分钟数,"lock":"none或keep或fixed","fixedStart":固定开始分钟数或null}]}。不要返回trip、day、requirements或其他字段，不要Markdown。'
-    def validate_edit(output):
-        edit=DayEdit.model_validate(output)
-        candidate=snapshot(data.trip)
-        candidate['days'][data.day].update(start=edit.start,activities=[a.model_dump(mode='json',exclude_none=True) for a in edit.activities])
-        result=ModelResult(summary=edit.summary,changes=edit.changes,trip=Trip.model_validate(candidate))
-        verify_proposal(data.trip,result.trip,data.day)
-        return result
-    recorder=RunRecorder(user.id,data.trip.id,data.trip.revision,'suggest')
-    try:
-        recorder.event('model_started')
-        output=await model_json(system,{'currentDay':data.trip.days[data.day].model_dump(mode='json',exclude_none=True),'requirements':data.trip.requirements.model_dump(mode='json',exclude_none=True) if data.trip.requirements else None,'mode':data.trip.mode,'request':data.prompt,'places':list({p['id']:p for p in PLACES+[POIS[a.placeId] for d in data.trip.days for a in d.activities]}.values())},validate=validate_edit)
-        recorder.event('validation',detail={'usage':request.state.model_metrics})
-        try:
-            result=validate_edit(output)
-        except ValueError:raise HTTPException(422,'模型建议未通过结构或锁定检查，原行程未修改')
-        id=str(uuid.uuid4());proposal={'id':id,'baseRevision':data.trip.revision,'trip':snapshot(result.trip),'summary':result.summary,'changes':result.changes,'source':'model','runId':recorder.id,'modelUsage':request.state.model_metrics}
-        recorder.complete({'proposal':proposal,'runId':recorder.id})
-        return proposal
-    except Exception as error:
-        recorder.fail(getattr(error,'detail',error));raise
-@app.get('/api/v1/runs/{id}')
-def get_run(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
-    r=s.get(Run,id)
-    if not r or r.owner!=user.id:raise HTTPException(404,'运行不存在')
-    return run_payload(r,events_for(id))
-@app.get('/api/v1/runs/{id}/events')
-def run_events(id:str,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
-    r=s.get(Run,id)
-    if not r or r.owner!=user.id:raise HTTPException(404,'运行不存在')
-    try:cursor=int(request.headers.get('last-event-id','0') or 0)
-    except ValueError:cursor=0
-    events=events_for(id,max(0,cursor))
-    async def stream():
-        for event in events:
-            yield f'id: {event.seq}\nevent: {event.phase}\ndata: {event.detail}\n\n'
-    return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache'})
+from backend.routers import auth,geo,planner,system,trips  # noqa: E402
+for module in (system,auth,trips,planner,geo):
+    app.include_router(module.router)

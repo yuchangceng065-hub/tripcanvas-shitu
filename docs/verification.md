@@ -204,3 +204,10 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 响应新增 `runId`；规划/草案/建议不再出现“假 SSE”。
 - 测试：草案事件顺序与游标补取、建议的 model_started/validation/completed；后端 123 项通过。
 - 边界：仍是请求内同步写入 + 回放，不是后台任务队列或长连接推送；进程重启不续跑。
+
+### 2026-11-05：路由拆分
+
+- 把 `app.py` 中 28 个接口按领域拆到 `backend/routers/`：`auth.py`、`system.py`、`trips.py`、`planner.py`、`geo.py`，全部使用 `APIRouter`；`app.py` 从 597 行降到 333 行。
+- 共享服务仍从 `backend.app` 导入（应用在定义完全部辅助函数后才 include 路由），`backend.app` 继续兼容导出 `Trip`、`POIS`、`verify_proposal` 等名称，测试与脚本无需改名。
+- 测试：后端 123 项、前端 81 项、Ruff、离线评测 30/30、空库迁移全部通过。
+- 未做：`draft_order`、`model_json` 等仍留在 `app.py`，可后续再抽成 `services` 模块。

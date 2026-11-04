@@ -123,7 +123,7 @@ def test_return_deadline_conflict_and_requirements_lock(client,monkeypatch):
     with pytest.raises(ValueError,match='需求'):verify_proposal(before,after,0)
 
 def test_model_edits_only_selected_day_and_preserves_saved_trip(client,monkeypatch):
-    import backend.app as module
+    import backend.routers.planner as module
     register(client);t=trip()
     t['days'].append({**copy.deepcopy(t['days'][0]),'date':'2026-11-08','activities':[]})
     client.put('/api/v1/trips/'+t['id'],json={'trip':t})
@@ -537,7 +537,7 @@ def test_alternatives_has_a_daily_per_user_cap(client,monkeypatch):
     assert second.status_code==429 and '方案生成次数' in second.json()['detail']
 
 def test_health_exposes_commit_and_security_headers(client,monkeypatch):
-    import backend.app as module
+    import backend.routers.system as module
     monkeypatch.setattr(module,'COMMIT','abcdef1234567890')
     response=client.get('/api/v1/health',headers={'X-Request-ID':'req-12345678'})
     assert response.json()['commit']=='abcdef123456'
@@ -564,7 +564,7 @@ def test_draft_records_real_run_events(client,monkeypatch):
 
 def test_suggest_records_model_run_phases(client,monkeypatch):
     register(client);trip_data=trip();client.put('/api/v1/trips/'+trip_data['id'],json={'trip':trip_data})
-    import backend.app as module
+    import backend.routers.planner as module
     monkeypatch.setenv('MODEL_BASE_URL','https://example.invalid/v1')
     monkeypatch.setenv('MODEL_NAME','glm-4.7-flash')
     monkeypatch.setenv('MODEL_API_KEY','test-key')
