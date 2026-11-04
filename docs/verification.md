@@ -157,3 +157,9 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - `backend/model_config.py` 统一探测脚本、健康状态和实际请求的密钥选择与参数。切换 Groq 时不会复用旧的智谱 `MODEL_API_KEY`；缺少 Groq Key 时 health 不报告模型已配置。
 - 按 Groq 官方 GPT-OSS 参数使用 `reasoning_effort=low`、`include_reasoning=false`；不发送该型号不支持的 `reasoning_format` 或 GLM 的 `thinking` 参数。保留 JSON 格式、一次修复上限和业务校验，不自动切换型号或付费档。
 - 自动化：86 项后端、73 项前端通过，类型检查和构建通过。新增精确供应商/型号参数、密钥隔离、健康状态回归；真实模型结果另行记录。
+
+### Groq 真实线上验收（2026-11-05）
+
+用户配置 Groq Key 后，官方小型 JSON 请求 HTTP 200，约 3.56 秒，型号返回 openai/gpt-oss-20b。运行变量已切换官方 Groq 地址及型号，PLANNER_MODE=auto。实现提交 0359120，Render dep-dbllqes9v7es738smlgg live，Sites appgdep_6aeb5dbae2f081918e033933548fe189 succeeded。
+
+使用独立测试账户从线上 FastAPI 验收：health model=true / plannerMode=model / amap / PostgreSQL；真实模型草案 source=model，两处候选全部保留且无新增地点，路线 source=amap，单次约 1.00 秒；真实局部修改 source=model，将第一站停留减少 15 分钟，另一锁定活动和所有活动 ID 保持，单次约 2.42 秒；建议运行记录可重新读取，未确认建议没有写入正式旅行。上述耗时仅为本次样例，不代表持续性能保证。没有改动用户已有旅行，没有开通付费档。

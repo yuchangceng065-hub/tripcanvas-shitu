@@ -7,10 +7,10 @@
 ## 当前状态（2026-11-04）
 
 - 线上前端：https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site/ ，Sites 静态托管，仅所有者可访问。
-- 线上 API：https://tripcanvas-api.onrender.com/api/v1 ，Render Free 单实例；数据库为 Neon Free PostgreSQL。健康检查返回 `plannerMode=rules`、`model=false`、`map=amap`、`routing=amap`、`storage=postgresql`。
+- 线上 API：https://tripcanvas-api.onrender.com/api/v1 ，Render Free 单实例；数据库为 Neon Free PostgreSQL。健康检查返回 `plannerMode=model`、`model=true`、`map=amap`、`routing=amap`、`storage=postgresql`。
 - 线上已验收：注册登录、Bearer 会话、行程同步、版本记录、快照分享与撤销、高德地图与路线、地点搜索、停车接驳。
-- 规划模式：`PLANNER_MODE=rules`，服务端不调用模型。模型适配代码保留，待有可用额度并确认模型 ID 后再启用。
-- 自动化：前端 73 项（含实际 Vue 组件交互）、后端 80 项测试通过，生产构建通过；最新修复记录见 `docs/verification.md`。
+- 规划模式：线上已启用 Groq Free Tier 的 `openai/gpt-oss-20b`，支持真实模型分日排序与局部修改；规则草案仍可单独选择。
+- 自动化：前端 73 项（含实际 Vue 组件交互）、后端 86 项测试通过，生产构建通过；最新修复记录见 `docs/verification.md`。
 
 ## 当前实现
 
@@ -39,7 +39,7 @@
 - 不支持公交地铁、多城市、实时导航、未来出行日交通预测；营业时间、门票、预约、停车可用性没有实时核验。
 - 自驾假设车辆初始停在当天首站选定（或推荐）的停车点，不是从用户任意位置出发的门到门方案；景区内部通行与入场时间未覆盖。
 - 高德搜索使用杭州行政区限制；无密钥时 Photon 使用周边经纬度框，边界结果需核对地址。
-- 模型未启用：免费供应方试用额度用尽后已按用户选择暂停，规则模式可独立完成现有流程。
+- 模型现使用 Groq 免费档，容量与限流以账户为准；达到限制会明确返回错误，不自动切换付费服务。规则草案仍可独立使用。
 - 旅行卡片文件和摘要是独立副本，发送后不能远程撤销；服务端分享链接支持撤销。
 - 费用为示例个人预算；图片是氛围配图，不是景点实景。
 
@@ -69,8 +69,8 @@ python3 -m venv .venv
 环境变量见 `.env.example`，通过运行环境注入后端，密钥不得使用 `VITE_` 前缀。
 
 - 高德：`AMAP_WEB_KEY`、`AMAP_JS_KEY`、`AMAP_JS_SECURITY_CODE` 齐备且 `ROUTING_PROVIDER` 不为 `osrm` 时启用；`PUBLIC_API_ORIGIN` 为 API 的 HTTPS 地址，用于 JS 安全代理。
-- 模型：OpenAI 兼容的 `MODEL_BASE_URL` + `MODEL_API_KEY` + `MODEL_NAME`，且 `PLANNER_MODE` 不为 `rules` 才会调用。当前线上为 `rules`。
-  - 当前计划使用 Groq 免费档：`MODEL_BASE_URL=https://api.groq.com/openai/v1`、`MODEL_NAME=openai/gpt-oss-20b`，专用密钥变量为 `GROQ_API_KEY`。不会将旧的智谱 `MODEL_API_KEY` 发给 Groq。设置低推理强度且不返回 reasoning，仍由服务端校验 JSON 和业务约束。[Groq 官方参数](https://console.groq.com/docs/reasoning)。免费档实际额度以账户控制台为准；真实调用与行程验收通过后才启用。
+- 模型：OpenAI 兼容的 `MODEL_BASE_URL` + `MODEL_API_KEY` + `MODEL_NAME`，且 `PLANNER_MODE` 不为 `rules` 才会调用。当前线上 Groq 为 `auto`，本地示例仍默认 `rules`。
+  - 当前已启用 Groq 免费档：`MODEL_BASE_URL=https://api.groq.com/openai/v1`、`MODEL_NAME=openai/gpt-oss-20b`，专用密钥变量为 `GROQ_API_KEY`。不会将旧的智谱 `MODEL_API_KEY` 发给 Groq。设置低推理强度且不返回 reasoning，仍由服务端校验 JSON 和业务约束。[Groq 官方参数](https://console.groq.com/docs/reasoning)。免费档实际额度以账户控制台为准；已完成真实 JSON 调用、线上模型草案和局部修改验收。
   - 智谱国内官方免费款：`https://open.bigmodel.cn/api/paas/v4`，型号 `glm-4.7-flash`；在 [API Keys](https://bigmodel.cn/usercenter/proj-mgmt/apikeys) 创建国内站密钥，不能混用其他供应商的 Key。官方[免费发布说明](https://www.zhipuai.cn/zh/news/148)与[模型文档](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash)。账号限流以控制台为准，尚待用户密钥做真实验证。
   - Z.AI：地址 `https://api.z.ai/api/paas/v4`；免费档可用 `glm-4.7-flash`，`glm-5.1` 是付费旗舰（官方价 $1.4 / $4.4 每百万输入 / 输出 token）。
   - OpenRouter：地址 `https://openrouter.ai/api/v1`，模型 `z-ai/glm-5.1`（付费，没有 `:free` 变体）。
