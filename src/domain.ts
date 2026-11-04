@@ -26,7 +26,8 @@ export const time=(m:number)=>`${String(Math.floor(m/60)).padStart(2,'0')}:${Str
 export function validate(trip:Trip,routes:RouteMap={}):Issue[]{const issues:Issue[]=[];trip.days.forEach((day,i)=>{if(day.start>=day.end)issues.push({id:`day-range-${i}`,day:i,message:`第 ${i+1} 天出发时间 ${time(day.start)} 不早于结束上限 ${time(day.end)}，请选择延后结束或缩短顺延时长`,severity:'error'});for(const e of schedule(trip,i,routes[routeKey(trip,i)])){const fixed=e.activity.lock==='fixed'?e.activity.fixedStart:undefined;if(fixed!==undefined&&e.earliest>fixed)issues.push({id:e.activity.id,day:i,message:`第 ${i+1} 天 · ${e.place.name} 最早 ${time(e.earliest)} 到达，比固定时间 ${time(fixed)} 晚 ${e.earliest-fixed} 分钟`,severity:'error'});if(e.end>day.end)issues.push({id:e.activity.id,day:i,message:`第 ${i+1} 天 · ${e.place.name} 将于 ${time(e.end)} 结束，超过当天 ${time(day.end)} 的结束时间 ${e.end-day.end} 分钟`,severity:'error'});if(e.activity.duration<15||e.activity.duration>360)issues.push({id:e.activity.id,day:i,message:'停留时间应在 15—360 分钟之间',severity:'error'})}if(day.activities.length>6)issues.push({id:`day${i}`,day:i,message:`第 ${i+1} 天安排较多，建议留出休息时间`,severity:'info'})});const r=trip.requirements;if(r&&r.returnBy!==null&&r.returnBy!==undefined){const di=trip.days.length-1;const list=schedule(trip,di,routes[routeKey(trip,di)]);const index=list.findIndex(e=>e.place.id===r.destinationPlaceId);const arrival=index<0?Infinity:list[index]!.earliest;if(arrival>r.returnBy)issues.push({id:'return-constraint',day:di,message:index<0?'末日返程地点缺失':`第 ${di+1} 天 · ${list[index]!.place.name} 最早 ${time(arrival)} 到达，比返程期限 ${time(r.returnBy)} 晚 ${arrival-r.returnBy} 分钟`,severity:'error'})}return issues}
 export function lockedChanges(before:Trip,after:Trip):string[]{const errors:string[]=[];before.days.forEach((d,di)=>d.activities.forEach(a=>{if(a.lock==='none')return;const next=after.days.flatMap(x=>x.activities).find(x=>x.id===a.id);if(!next||next.placeId!==a.placeId||next.lock!==a.lock)errors.push(`${placeById(a.placeId).name} 已锁定`);if(a.lock==='fixed'&&next&&(after.days[di]?.date!==d.date||!after.days[di]?.activities.some(x=>x.id===a.id)||next.fixedStart!==a.fixedStart||next.duration!==a.duration))errors.push(`${placeById(a.placeId).name} 的固定安排不可修改`)}));return errors}
 export interface DepartureShift {day:number;delay:number;shiftFixed:boolean;extendEnd:boolean}
-export interface Proposal {id:string;baseRevision:number;trip:Trip;summary:string;changes:string[];source:'demo'|'model'|'schedule';departure?:DepartureShift}
+export interface Coordination {day:number;basis:Trip;changes:string[];resolved:boolean;earlierStart?:number;warnings:string[]}
+export interface Proposal {id:string;baseRevision:number;trip:Trip;summary:string;changes:string[];source:'demo'|'model'|'schedule';departure?:DepartureShift;coordination?:Coordination}
 // Only these simple departure requests use arithmetic; mixed requests still go to the assistant.
 export function departureDelay(prompt:string):number|null {
  if(!/晚.*出发|出发.*晚|推迟.*出发|出发.*推迟|多睡/.test(prompt)||/不要|不想|别|室内|下雨|减少|删除|去掉|换成|增加|添加/.test(prompt))return null
@@ -65,8 +66,9 @@ export function validDepartureProposal(before:Trip,p:Proposal,routes:RouteMap={}
  if(p.source!=='schedule'||!p.departure||p.baseRevision!==before.revision)return false
  try{const {day,delay,shiftFixed,extendEnd}=p.departure;return JSON.stringify(departureProposal(before,day,delay,routes,{shiftFixed,extendEnd}).trip)===JSON.stringify(p.trip)}catch{return false}
 }
-export function proposalErrors(before:Trip,after:Trip,routes:RouteMap={}):Issue[] {
+export function proposalErrors(before:Trip,after:Trip,routes:RouteMap={},includeDay?:number):Issue[] {
  const changed=new Set(after.days.flatMap((d,i)=>JSON.stringify(d)!==JSON.stringify(before.days[i])?[i]:[]))
+ if(includeDay!==undefined)changed.add(includeDay)
  return validate(after,routes).filter(issue=>issue.severity==='error'&&(issue.day===undefined||changed.has(issue.day)))
 }
 export function suggest(trip:Trip,dayIndex:number,prompt:string):Proposal {const delay=departureDelay(prompt);if(delay!==null)return departureProposal(trip,dayIndex,delay);const next=clone(trip);const day=next.days[dayIndex]!;const changes:string[]=[];

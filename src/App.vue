@@ -4,6 +4,7 @@ import { Map,Compass,Heart,Plus,ArrowUpRight,ChevronDown,ChevronRight,ChevronLef
 import TripMap from './components/TripMap.vue'
 import PlacePicker from './components/PlacePicker.vue'
 import TripBuilder from './components/TripBuilder.vue'
+import {coordinateProposal,coordinationViolations,earlierProposal} from './coordination'
 import { useTrips } from './store'
 import { places,placeById,createTrip,clone,uid,time,schedule,validate,suggest,lockedChanges,registerPlaces,capturePlaces,departureDelay,departureProposal,validDepartureProposal,proposalErrors,returnAnchor,type Trip,type Activity,type Proposal } from './domain'
 import {checkAPI,api,remoteSuggestion,setToken,connection,backendConfigured} from './api'
@@ -21,8 +22,9 @@ const totalTravel=computed(()=>entries.value.reduce((s,e)=>s+e.travel,0)),distan
 const daysLabel=computed(()=>`${shortDate(trip.value.days[0]!.date)} — ${shortDate(trip.value.days.at(-1)!.date)}`)
 const proposal=ref<Proposal|null>(null),prompt=ref(''),busy=ref(false),response=ref(''),backend=computed(()=>connection.status==='online'),hasModel=ref(false),user=ref<{username:string}|null>(null),loginMode=ref(false),username=ref(''),password=ref(''),authError=ref(''),accountBusy=ref(false)
 const proposalRoutes=ref<RouteMap>({}),proposalRouteError=ref('')
-const proposalIssues=computed(()=>proposal.value?proposalErrors(trip.value,proposal.value.trip,proposalRoutes.value):[])
-const departureRows=computed(()=>{if(!proposal.value?.departure)return [];const day=proposal.value.departure.day;const old=schedule(trip.value,day,proposalRoutes.value[routeKey(trip.value,day)]);return schedule(proposal.value.trip,day,proposalRoutes.value[routeKey(proposal.value.trip,day)]).map(e=>({id:e.activity.id,name:e.place.name,before:old.find(o=>o.activity.id===e.activity.id)!,after:e}))})
+const busyText=ref('正在检查可调整的安排…')
+const proposalIssues=computed(()=>proposal.value?proposalErrors(trip.value,proposal.value.trip,proposalRoutes.value,proposal.value.coordination?.day):[])
+const departureRows=computed(()=>{const p=proposal.value;if(!p?.departure&&!p?.coordination)return [];const day=p.departure?.day??p.coordination!.day;const old=schedule(trip.value,day,proposalRoutes.value[routeKey(trip.value,day)]),next=schedule(p.trip,day,proposalRoutes.value[routeKey(p.trip,day)]);return [...next.map(e=>({id:e.activity.id,name:e.place.name,before:old.find(o=>o.activity.id===e.activity.id),after:e})),...old.filter(e=>!next.some(n=>n.activity.id===e.activity.id)).map(e=>({id:e.activity.id,name:e.place.name,before:e,after:undefined}))]})
 const canShiftFixed=computed(()=>proposal.value?.departure&&trip.value.days[proposal.value.departure.day]!.activities.some(a=>a.lock==='fixed'&&!returnAnchor(trip.value,proposal.value!.departure!.day,a)))
 const builderKey=ref(0),resumeBuilder=ref(false)
 const promptComposing=ref(false)
@@ -30,7 +32,7 @@ const assistantScroll=ref<HTMLElement|null>(null)
 watch([busy,response],async()=>{
  await nextTick()
  const panel=assistantScroll.value;if(!panel)return
- const card=proposal.value?.departure?panel.querySelector<HTMLElement>('.proposal-card'):null
+ const card=proposal.value?.departure||proposal.value?.coordination?panel.querySelector<HTMLElement>('.proposal-card'):null
  if(card)panel.scrollTop+=card.getBoundingClientRect().top-panel.getBoundingClientRect().top
  else panel.scrollTop=panel.scrollHeight
 })
@@ -69,7 +71,7 @@ function saveEdit(){if(!editActivity.value)return;const a=editActivity.value;if(
 function addPlace(id:string){const n=clone(trip.value);const a={id:uid(),placeId:id,duration:placeById(id).duration,lock:'none' as const};n.days[dayIndex.value]!.activities.push(a);commit(n,'添加 '+placeById(id).name);selected.value=a.id;modal.value='';notify('已添加到当天行程')}
 async function generate(text=prompt.value){
  if(busy.value||!text.trim())return
- busy.value=true;prompt.value=text;proposal.value=null;response.value='';proposalRouteError.value='';proposalRoutes.value={}
+ busy.value=true;busyText.value='正在生成调整方案…';prompt.value=text;proposal.value=null;response.value='';proposalRouteError.value='';proposalRoutes.value={...roadRoutes.value}
  const before=clone(trip.value),day=dayIndex.value
  try{
   let next:Proposal
@@ -80,20 +82,25 @@ async function generate(text=prompt.value){
   for(let i=0;i<next.trip.days.length;i++){if(JSON.stringify(next.trip.days[i])===JSON.stringify(before.days[i]))continue;if(next.trip.days[i]!.activities.length>1){try{proposalRoutes.value[routeKey(next.trip,i)]=await loadRoute(next.trip,i)}catch(e){proposalRouteError.value='道路用时未核验：'+(e as Error).message}}}
   if(trip.value.id!==before.id||trip.value.revision!==before.revision||dayIndex.value!==day)throw new Error('生成期间行程发生变化，请重新调整')
   if(next.departure)next=departureProposal(before,day,next.departure.delay,proposalRoutes.value)
+  if(!proposalRouteError.value)next=await coordinateProposal(before,next,day,proposalRoutes.value,loadRoute,text=>busyText.value=text)
+  if(trip.value.id!==before.id||trip.value.revision!==before.revision||dayIndex.value!==day)throw new Error('协调期间行程发生变化，请重新调整')
   proposal.value=next;response.value=next.summary
  }catch(e){response.value=(e as Error).message}finally{busy.value=false}
 }
-function changeDepartureOption(event:Event,key:'shiftFixed'|'extendEnd'){
+async function changeDepartureOption(event:Event,key:'shiftFixed'|'extendEnd'){
  const p=proposal.value;if(!p?.departure||busy.value)return
  if(p.baseRevision!==trip.value.revision){notify('行程已变化，请重新生成方案');return}
  const {day,delay,shiftFixed,extendEnd}=p.departure
- proposal.value=departureProposal(trip.value,day,delay,proposalRoutes.value,{shiftFixed,extendEnd,[key]:(event.target as HTMLInputElement).checked})
+ const before=clone(trip.value),next=departureProposal(before,day,delay,proposalRoutes.value,{shiftFixed,extendEnd,[key]:(event.target as HTMLInputElement).checked})
+ busy.value=true;busyText.value='正在重新协调时间…'
+ try{const result=await coordinateProposal(before,next,day,proposalRoutes.value,loadRoute,text=>busyText.value=text);if(trip.value.id!==before.id||trip.value.revision!==before.revision||dayIndex.value!==day)throw new Error('行程已变化，请重新生成');proposal.value=result}catch(e){response.value=(e as Error).message}finally{busy.value=false}
 }
+function useEarlierStart(){const p=proposal.value;if(!p||p.baseRevision!==trip.value.revision){notify('行程已变化，请重新生成');return}try{const next=earlierProposal(p);const violations=coordinationViolations(trip.value,next,proposalRoutes.value);if(violations.length)throw new Error(violations.join('；'));proposal.value=next;response.value='已预览提前出发的备选方案，原行程尚未修改。'}catch(e){notify((e as Error).message)}}
 function applyProposal(){
  if(!proposal.value||busy.value)return
  const p=proposal.value
  if(p.trip.id!==trip.value.id||p.baseRevision!==trip.value.revision){notify('行程已变化，请重新生成方案');return}
- const violations=p.source==='schedule'?(validDepartureProposal(trip.value,p,proposalRoutes.value)?[]:['顺延方案已失效，请重新生成']):lockedChanges(trip.value,p.trip)
+ const violations=p.coordination?coordinationViolations(trip.value,p,proposalRoutes.value):p.departure?(validDepartureProposal(trip.value,p,proposalRoutes.value)?[]:['顺延方案已失效，请重新生成']):lockedChanges(trip.value,p.trip)
  if(violations.length){notify(violations.join('；'));return}
  if(proposalRouteError.value){notify('请先重新生成，完成道路路线核验');return}
  if(proposalIssues.value.length){notify('方案中仍有时间冲突，请先调整条件');return}
@@ -164,13 +171,14 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=
       <div class="suggestion-title">试试这样调整 <Sparkles :size="13"/></div>
       <div class="quick-prompts"><button @click="generate('今天轻松一点，减少一个地点')" :disabled="busy"><Leaf :size="16"/><span>今天想轻松一点</span><ArrowUpRight :size="14"/></button><button @click="generate('下雨了，改成室内活动')" :disabled="busy"><CloudRain :size="16"/><span>换成室内的好去处</span><ArrowUpRight :size="14"/></button><button @click="generate('晚出发一小时')" :disabled="busy"><Coffee :size="16"/><span>多睡一会，晚点出发</span><ArrowUpRight :size="14"/></button></div>
       <div class="protected-note"><LockKeyhole :size="14"/><p>你锁定的安排，会好好保留。<span>调整前可以预览，确认后再应用。</span></p></div>
-      <div v-if="busy" class="assistant-message" role="status"><LoaderCircle :size="17" class="spin"/>正在检查可调整的安排…</div>
+      <div v-if="busy" class="assistant-message" role="status"><LoaderCircle :size="17" class="spin"/>{{busyText}}</div>
       <div v-if="response" class="assistant-message response" role="status"><Sparkles :size="16"/><p>{{response}}</p></div>
       <div v-if="proposal" class="proposal-card"><div class="proposal-head"><span>{{proposal.departure?'整体顺延预览':'调整预览'}}</span><small>{{proposal.source==='schedule'?'排程计算 · ':''}}Day {{dayIndex+1}}</small></div>
-       <div v-if="proposal.departure" class="departure-options"><label v-if="canShiftFixed"><input type="checkbox" :checked="proposal.departure.shiftFixed" @change="changeDepartureOption($event,'shiftFixed')"/>固定游览安排也顺延</label><label><input type="checkbox" :checked="proposal.departure.extendEnd" @change="changeDepartureOption($event,'extendEnd')"/>允许当天结束时间延后</label><small>地点、停留时长与顺序保留；返程期限保持。勾选后先预览，确认才生效。</small></div>
+       <div v-if="proposal.departure" class="departure-options"><label v-if="canShiftFixed"><input type="checkbox" :disabled="busy" :checked="proposal.departure.shiftFixed" @change="changeDepartureOption($event,'shiftFixed')"/>固定游览安排也顺延</label><label><input type="checkbox" :disabled="busy" :checked="proposal.departure.extendEnd" @change="changeDepartureOption($event,'extendEnd')"/>允许当天结束时间延后</label><small>优先保留地点与顺序；必要时协调未锁定停留。勾选后先预览，返程期限保持。</small></div>
+       <div v-if="proposal.coordination" class="coordination-note" :class="{unresolved:!proposal.coordination.resolved}"><strong>{{proposal.coordination.resolved?'已自动协调时间':'自动协调后仍有冲突'}}</strong><span>{{proposal.coordination.resolved?'已核验道路时间并保留锁定安排，具体变化如下。':'当前固定条件下尚未找到可行安排，可选择下方备选出发时间，或调整锁定条件。'}}</span><span v-for="warning in proposal.coordination.warnings" :key="warning">{{warning}}</span></div>
        <p v-for="(change,i) in proposal.changes" :key="i"><ArrowRight :size="14"/>{{change}}</p>
-       <div v-if="departureRows.length" class="departure-timeline" aria-label="逐站时间对比"><div class="departure-row departure-row-head"><span>地点</span><span>原安排</span><span>新安排</span></div><div v-for="row in departureRows" :key="row.id" class="departure-row"><strong>{{row.name}}</strong><span>{{time(row.before.start)}}<small>— {{time(row.before.end)}}</small></span><span :class="{late:row.after.conflict}">{{time(row.after.start)}}<small>— {{time(row.after.end)}}</small></span></div></div>
-       <div v-for="(issue,i) in proposalIssues" :key="`${issue.id}-${i}`" class="proposal-error"><AlertTriangle :size="14"/>{{issue.message}}</div><p v-if="proposalRouteError" class="proposal-error">{{proposalRouteError}}，请重新生成。</p><button class="button primary" @click="applyProposal" :disabled="busy||proposalIssues.length>0||!!proposalRouteError"><Check :size="16"/>{{proposal.departure?'确认顺延并应用':'应用这个安排'}}</button><button class="text-button" @click="proposal=null;response=''">保留原计划</button></div>
+       <details v-if="departureRows.length" :open="!!proposal.departure" class="time-comparison"><summary>逐站时间对比</summary><div class="departure-timeline" aria-label="逐站时间对比"><div class="departure-row departure-row-head"><span>地点</span><span>原安排</span><span>新安排</span></div><div v-for="row in departureRows" :key="row.id" class="departure-row"><strong>{{row.name}}</strong><span v-if="row.before">{{time(row.before.start)}}<small>— {{time(row.before.end)}}</small></span><span v-else>新增</span><span v-if="row.after" :class="{late:row.after.conflict}">{{time(row.after.start)}}<small>— {{time(row.after.end)}}</small></span><span v-else>本次移除</span></div></div></details>
+       <div v-for="(issue,i) in proposalIssues" :key="`${issue.id}-${i}`" class="proposal-error"><AlertTriangle :size="14"/>{{issue.message}}</div><button v-if="proposal.coordination?.earlierStart!==undefined&&!proposal.coordination.resolved" class="button quiet full earlier-option" :disabled="busy" @click="useEarlierStart">改为 {{time(proposal.coordination.earlierStart)}} 出发并预览</button><p v-if="proposalRouteError" class="proposal-error">{{proposalRouteError}}，请重新生成。</p><button class="button primary" @click="applyProposal" :disabled="busy||proposalIssues.length>0||!!proposalRouteError"><Check :size="16"/>{{proposal.departure?'确认顺延并应用':'应用这个安排'}}</button><button class="text-button" @click="proposal=null;response=''">保留原计划</button></div>
      </div>
      <form class="composer" @submit.prevent="generate()"><textarea v-model="prompt" rows="2" placeholder="说说你想怎么调整今天…" aria-label="行程调整需求" aria-describedby="composer-help" :disabled="busy" @keydown="onPromptKeydown" @compositionstart="promptComposing=true" @compositionend="promptComposing=false"/><p id="composer-help" class="composer-help">Enter 发送 · Shift+Enter 换行</p><div><span><Sparkles :size="12"/>仅调整 Day {{dayIndex+1}}</span><button type="submit" :disabled="busy||!prompt.trim()" aria-label="发送调整需求"><LoaderCircle v-if="busy" class="spin" :size="16"/><ArrowUp v-else :size="17"/></button></div></form>
      <p class="assistant-disclaimer">{{proposal?.source==='schedule'?'本次为道路排程计算，确认后才应用':hasModel&&user?'建议仍需结合实际情况确认':'示例助手使用规则建议，非实时模型回答'}}</p>
