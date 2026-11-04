@@ -49,13 +49,19 @@ def parse_request(text,today=None):
     if days:requirements['days']=_number(days.group(1))
     people=re.search(r'([一二两三四五六七八九十]|\d{1,2})\s*(?:个)?人',text)
     if people:requirements['people']=_number(people.group(1))
-    if re.search(r'自驾|开车|驾车|租车',text):requirements['mode']='drive'
-    elif re.search(r'步行|徒步|(?:全程|主要|选择|打算)走路',text) and not re.search(r'不(?:想|要)?步行|不要徒步',text):requirements['mode']='walk'
+    # Resolve negation per mention instead of letting any drive keyword win.
+    modes=set()
+    for mode,pattern in (('drive',r'自驾|开车|驾车|租车'),('walk',r'步行|徒步|(?:全程|主要|选择|打算)走路')):
+        for occurrence in re.finditer(pattern,text):
+            prefix=re.split(r'[，,。；;、]',text[:occurrence.start()])[-1]
+            if not re.search(r'(?:不想|不要|不用|不再|不打算|不考虑|不选择|不|别|避免|取消)\s*$',prefix):modes.add(mode)
+    if len(modes)==1:requirements['mode']=modes.pop()
+    elif modes:notes.append('提到了多种交通方式，请确认本次使用步行还是自驾接驳。')
     if re.search(r'少走|不想走|轻松|不.{0,2}赶|悠闲|休闲|慢',text):requirements['pace']='relaxed'
     elif re.search(r'紧凑|充实|多逛|多去',text):requirements['pace']='full'
     interests=[interest for interest in INTERESTS if interest in text]
     if interests:requirements['interests']=interests
-    deadline=re.search(r'(?P<period>凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*(?P<hour>\d{1,2}|[一二三四五六七八九十]{1,3})\s*(?P<separator>[:：点])\s*(?P<minute>\d{1,2})?\s*(?:分)?\s*前?\s*到\s*(?P<place>[^\s，。；、,;]+)',text)
+    deadline=re.search(r'(?P<period>凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*(?P<hour>\d{1,2}|[一二三四五六七八九十]{1,3})\s*(?P<separator>[:：点])\s*(?P<minute>半|\d{1,2}|[一二三四五六七八九十]{1,3})?\s*(?:分)?\s*前?\s*到\s*(?P<place>[^\s，。；、,;]+)',text)
     destination=None
     ambiguous_deadline=False
     if deadline:
@@ -72,7 +78,10 @@ def parse_request(text,today=None):
             elif deadline['separator']=='点' and hour<12:
                 ambiguous_deadline=True
             if ambiguous_deadline:notes.append('返程时间未注明上午或下午，请手动确认具体时刻。')
-            else:requirements['returnBy']=_clock(hour,deadline['minute'])
+            else:
+                minute=deadline['minute']
+                minute=30 if minute=='半' else _number(minute) if minute else 0
+                requirements['returnBy']=_clock(hour,minute)
         except ValueError:
             ambiguous_deadline=True;notes.append('返程时间无法识别，请手动填写。')
     else:

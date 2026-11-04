@@ -19,6 +19,7 @@ from backend.catalog import PlaceSearch
 from backend.amap import AmapService,RoutingGateway,enabled as amap_enabled,restricted_parking
 from backend.planning import Requirements, DraftBody, AlternativesBody, Order, check_order, evaluate, heuristic, make_trip
 from backend.alternatives import PlanSearch
+from backend.model_metrics import current_metrics,empty_metrics,record_usage
 from backend.requirements import parse_request
 from backend.model_config import model_api_key,model_key_name,model_options
 
@@ -128,7 +129,10 @@ async def origin_check(request,call_next):
         if origin and origin not in ORIGINS and urlsplit(origin).netloc!=request.headers.get('host',''):
             from fastapi.responses import JSONResponse
             return JSONResponse({'detail':'请求来源不受信任'},status_code=403)
-    return await call_next(request)
+    request.state.model_metrics=empty_metrics()
+    trace=current_metrics.set(request.state.model_metrics)
+    try:return await call_next(request)
+    finally:current_metrics.reset(trace)
 
 def db():
     with SessionLocal() as s: yield s
@@ -569,11 +573,16 @@ async def model_json(system,data,*,validate=None):
     messages=[{'role':'system','content':system},{'role':'user','content':json.dumps(data,ensure_ascii=False)}]
     for attempt in range(2):
         throttle('model-global',4)
+        trace=current_metrics.get();started=time.monotonic();usage_received=False
+        if trace is not None:
+            trace['providerRequests']+=1
+            trace['repairRequests']+=int(attempt>0)
         try:
             async with httpx.AsyncClient(timeout=65) as client:
                 options=model_options(base,model)
                 r=await client.post(base.rstrip('/')+'/chat/completions',headers={'Authorization':'Bearer '+key},json={'model':model,'messages':messages,'response_format':{'type':'json_object'},'temperature':.2,'max_tokens':4096,'stream':False,**options})
-                r.raise_for_status();choice=r.json()['choices'][0];content=choice['message']['content']
+                r.raise_for_status();provider_result=r.json();record_usage(trace,provider_result.get('usage'));usage_received=True
+                choice=provider_result['choices'][0];content=choice['message']['content']
             output=parse_model_json(content,choice.get('finish_reason'))
             if validate:validate(output)
             return output
@@ -593,6 +602,10 @@ async def model_json(system,data,*,validate=None):
             if status==404:raise HTTPException(503,'模型地址或名称不正确，请检查 MODEL_BASE_URL / MODEL_NAME')
             raise HTTPException(502,'模型服务返回错误，原行程未修改')
         except httpx.HTTPError:raise HTTPException(502,'模型服务暂不可用或免费额度已用完，请重试或选择规则草案')
+        finally:
+            if trace is not None:
+                if not usage_received:trace['tokensComplete']=False
+                trace['providerSeconds']=round(trace['providerSeconds']+time.monotonic()-started,4)
 
 class RequestBody(StrictModel):
     text:str=Field(min_length=2,max_length=1000)
@@ -653,6 +666,7 @@ async def alternatives(data:AlternativesBody,request:Request,user:User=Depends(c
         search=PlanSearch(data,POIS,sort_pois,request.app.state.router.route,Trip.model_validate)
         result=await search.search(order)
         result['source']='model+search' if source=='model' else 'constraint-search'
+        result['modelUsage']=request.state.model_metrics
         return result
 
 @app.post('/api/v1/planner/draft')
@@ -662,10 +676,10 @@ async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
     trip=Trip.model_validate(make_trip(data,order,POIS));routes={}
     for i,day in enumerate(trip.days):
         if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(trip,day))
-    return {'trip':snapshot(trip),'source':source,'issues':evaluate(trip,routes,POIS),'routes':routes,'warnings':['营业时间、票价、停车与进出景区时间待确认。','草案仅使用你确认的候选地点；保存前请核对。']}
+    return {'trip':snapshot(trip),'source':source,'issues':evaluate(trip,routes,POIS),'routes':routes,'modelUsage':request.state.model_metrics,'warnings':['营业时间、票价、停车与进出景区时间待确认。','草案仅使用你确认的候选地点；保存前请核对。']}
 
 @app.post('/api/v1/planner/suggest')
-async def plan(data:SuggestionBody,user:User=Depends(current_user),s:Session=Depends(db)):
+async def plan(data:SuggestionBody,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
     throttle('model:'+user.id,6)
     if data.day>=len(data.trip.days):raise HTTPException(422,'日期不存在')
     key=model_api_key();base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
@@ -685,7 +699,7 @@ async def plan(data:SuggestionBody,user:User=Depends(current_user),s:Session=Dep
     for i,day in enumerate(result.trip.days):
         if len(day.activities)>1:
             roads=await app.state.router.route(route_body(result.trip,day))
-    id=str(uuid.uuid4());proposal={'id':id,'baseRevision':data.trip.revision,'trip':snapshot(result.trip),'summary':result.summary,'changes':result.changes,'source':'model'}
+    id=str(uuid.uuid4());proposal={'id':id,'baseRevision':data.trip.revision,'trip':snapshot(result.trip),'summary':result.summary,'changes':result.changes,'source':'model','modelUsage':request.state.model_metrics}
     s.add(Run(id=id,owner=user.id,trip_id=data.trip.id,base_revision=data.trip.revision,result=json.dumps(proposal),created=time.time()));s.commit();return proposal
 @app.get('/api/v1/runs/{id}')
 def get_run(id:str,user:User=Depends(current_user),s:Session=Depends(db)):

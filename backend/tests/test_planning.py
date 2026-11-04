@@ -76,3 +76,22 @@ def test_walking_preference_is_not_transport(text,mode):
 def test_aliases_deduplicate_after_normalization_but_keep_roles():
     parsed=parse_request('想去浙工大和浙江工业大学，从浙江工业大学出发')
     assert parsed['mentions']==[{'text':'浙江工业大学','role':'visit'},{'text':'浙江工业大学','role':'origin'}]
+
+@pytest.mark.parametrize('phrase,expected',[
+ ('下午五点半',1050),('下午5点半',1050),('下午五点三十分',1050),('上午九点十五分',555),('17:30',1050),
+])
+def test_natural_chinese_return_minutes(phrase,expected):
+ parsed=parse_request(f'2026-11-14杭州一天，两个人，{phrase}前到杭州东站')
+ assert parsed['requirements']['returnBy']==expected
+ assert {'text':'杭州东站','role':'destination'} in parsed['mentions']
+
+@pytest.mark.parametrize('text,mode',[
+ ('不想自驾，选择步行','walk'),('不要开车，我想徒步','walk'),('不步行，选择自驾','drive'),
+ ('不想步行，自驾少走路','drive'),('自驾但少走路','drive'),('不考虑租车，主要走路','walk'),
+])
+def test_transport_negation_is_local_to_each_mention(text,mode):
+ assert parse_request(text)['requirements']['mode']==mode
+
+def test_multiple_transport_choices_require_confirmation():
+ parsed=parse_request('自驾或者步行都可以')
+ assert 'mode' not in parsed['requirements'] and parsed['notes']

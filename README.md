@@ -2,15 +2,15 @@
 
 面向杭州 1—3 日短途游的个人行程规划网页，使用 Vue 3 + TypeScript 和 FastAPI。支持真实地点搜索、步行 / 自驾接驳路线及地图时间轴编辑。首次打开是杭州西湖的可编辑示例行程。
 
-当前执行范围、里程碑与验收标准见 [杭州版本执行计划](docs/hangzhou-plan.md)；已完成与未完成能力见 [能力清单](docs/capability-matrix.md)。现阶段已支持候选地点草案、单地点意图加入和局部路线调整；“一句完整需求生成全程”仍是进行中的 M1 任务。
+当前执行范围、里程碑与验收标准见 [杭州版本执行计划](docs/hangzhou-plan.md)；已完成与未完成能力见 [能力清单](docs/capability-matrix.md)。现阶段已支持候选地点草案、单地点意图加入和局部路线调整；规则需求确认与模型分日排序已接通，多方案可在新建旅行中比较。
 
-## 当前状态（2026-11-04）
+## 当前状态（2026-11-05）
 
 - 线上前端：https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site/ ，Sites 静态托管，仅所有者可访问。
 - 线上 API：https://tripcanvas-api.onrender.com/api/v1 ，Render Free 单实例；数据库为 Neon Free PostgreSQL。健康检查返回 `plannerMode=model`、`model=true`、`map=amap`、`routing=amap`、`storage=postgresql`。
 - 线上已验收：注册登录、Bearer 会话、行程同步、版本记录、快照分享与撤销、高德地图与路线、地点搜索、停车接驳。
 - 规划模式：线上已启用 Groq Free Tier 的 `openai/gpt-oss-20b`，支持真实模型分日排序与局部修改；规则草案仍可单独选择。
-- 自动化：前端 76 项（含实际 Vue 组件交互）、后端 101 项测试通过，生产构建通过；最新修复记录见 `docs/verification.md`。
+- 自动化：前端 76 项（含实际 Vue 组件交互）、后端 118 项测试通过，生产构建通过；最新修复记录见 `docs/verification.md`。
 
 ## 当前实现
 
@@ -95,13 +95,15 @@ API 仍在 8000 端口，前端使用 `npm run dev`。不要将示例配置直�
 
 ## 校验
 
+固定任务评测与真实模型冒烟必须分开记录，详见 [评测说明](docs/evaluation.md)。本次固定工程任务从 28/30 修复到 30/30；其中 10/10 可行规划任务成功、4 条负向任务未错误接受，模型调用为 0。
+
 ```sh
 npm test
 npm run build
 .venv/bin/python -m pytest backend/tests -q
 ```
 
-当前结果：前端 63 项、后端 52 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过。
+当前结果：前端 76 项、后端 118 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过。
 
 浏览器验收（需本地 API + Vite + Chrome 调试端口）：`node scripts/browser-check.mjs`，脚本会跑完“一句需求 → 地点确认 → 草案 → 确认保存”，并拒绝在非本地 API 上创建测试账号。测试覆盖锁定保护、仅修改指定日期、时间冲突与顺延协调、中文输入法 Enter、地点意图、道路结构校验、分享快照、撤销、用户隔离、版本幂等、高德响应与预算。
 

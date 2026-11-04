@@ -372,7 +372,7 @@ def test_model_mode_calls_an_openai_compatible_provider(client,monkeypatch):
             calls.append({'path':self.path,'auth':self.headers.get('authorization'),'body':body})
             user=json.loads(body['messages'][1]['content'])
             content=json.dumps({'days':[list(reversed(user['candidateIds']))]},ensure_ascii=False)
-            payload=json.dumps({'choices':[{'message':{'content':content},'finish_reason':'stop'}]}).encode()
+            payload=json.dumps({'choices':[{'message':{'content':content},'finish_reason':'stop'}],'usage':{'prompt_tokens':123,'completion_tokens':24,'total_tokens':147}}).encode()
             self.send_response(200);self.send_header('content-type','application/json')
             self.send_header('content-length',str(len(payload)));self.end_headers();self.wfile.write(payload)
         def log_message(self,*args):pass
@@ -396,6 +396,11 @@ def test_model_mode_calls_an_openai_compatible_provider(client,monkeypatch):
         assert calls[0]['body']['model']=='glm-4.7-flash'
         places=[a['placeId'] for d in response.json()['trip']['days'] for a in d['activities']]
         assert places==['quyuan','museum']
+        usage=response.json()['modelUsage']
+        assert usage['providerRequests']==1 and usage['repairRequests']==0 and usage['totalTokens']==147 and usage['tokensComplete']
+        body['useModel']=False
+        reset=client.post('/api/v1/planner/draft',json=body).json()['modelUsage']
+        assert reset['providerRequests']==0 and reset['totalTokens']==0 and len(calls)==1
     finally:server.shutdown()
 
 @pytest.mark.parametrize('activities',[[],[{'id':'a','placeId':'quyuan','duration':60,'lock':'none'}]])
