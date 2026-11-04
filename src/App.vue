@@ -172,7 +172,7 @@ async function auth(event:Event){
    for(const t of remote){registerPlaces(t.placeSnapshots);const index=store.trips.findIndex(x=>x.id===t.id);if(index>=0)store.trips[index]=t;else store.trips.push(t)}
   }catch{synced=false}
   modal.value=resumeBuilder.value?'new':'';resumeBuilder.value=false
-  notify(synced?'登录成功，可以使用 AI 调整与云端同步':'已登录；云端行程暂未加载，可稍后重新连接')
+  notify(synced?(hasModel.value?'登录成功，可以使用 AI 调整与云端同步':'登录成功，可以同步行程并使用规则规划'):'已登录；云端行程暂未加载，可稍后重新连接')
   await syncTrip(trip.value)
  }catch(e){authError.value=(e as Error).message}finally{accountBusy.value=false}
 }
