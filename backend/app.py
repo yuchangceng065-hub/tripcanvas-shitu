@@ -15,7 +15,7 @@ from backend.model_metrics import current_metrics,empty_metrics
 from backend.model_config import model_api_key,model_options
 
 from backend.db import (DATABASE_URL, engine, SessionLocal, Base, User, AuthSession, TripRow,
-                        VersionRow, Share, Run, PlaceRecord, ProviderUsage)
+                        VersionRow, Share, Run, PlaceRecord, ProviderUsage, PlanningSession)
 from backend.places import PLACES, POIS
 from backend.schemas import (Trip)
 
@@ -33,6 +33,11 @@ async def lifespan(app):
     with SessionLocal.begin() as session:
         for run in session.scalars(select(Run).where(Run.result.like('%"status": "running"%'))):
             session.execute(update(Run).where(Run.id==run.id).values(result=json.dumps({'kind':json.loads(run.result).get('kind'),'status':'interrupted','error':'服务重启，运行已中断'})))
+    with SessionLocal.begin() as session:
+        for row in session.scalars(select(PlanningSession).where(PlanningSession.status=='running')):
+            state=json.loads(row.state)
+            state.setdefault('usage',empty_metrics())['tokensComplete']=False
+            row.state=json.dumps(state,ensure_ascii=False);row.status='interrupted'
     async with httpx.AsyncClient(timeout=20,headers={'User-Agent':'TripCanvas/1.1 (+https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site)'}) as client:
         with SessionLocal() as session:
             for row in session.scalars(select(PlaceRecord)):
@@ -48,6 +53,8 @@ ORIGINS=os.getenv('FRONTEND_ORIGINS','http://127.0.0.1:5173,http://localhost:517
 ORIGINS=[origin.strip().rstrip('/') for origin in ORIGINS if origin.strip()]
 COMMIT=(os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_COMMIT') or '').strip()
 if not logging.getLogger().handlers:logging.basicConfig(level=os.getenv('LOG_LEVEL','INFO'),format='%(asctime)s %(levelname)s %(name)s %(message)s')
+# Upstream URLs can contain map credentials; keep request IDs, not URL dumps.
+logging.getLogger('httpx').setLevel(logging.WARNING)
 app.add_middleware(CORSMiddleware,allow_origins=ORIGINS,allow_credentials=True,allow_methods=['GET','POST','PUT','PATCH','DELETE'],allow_headers=['Content-Type','Idempotency-Key','Authorization','Last-Event-ID'])
 @app.middleware('http')
 async def origin_check(request,call_next):

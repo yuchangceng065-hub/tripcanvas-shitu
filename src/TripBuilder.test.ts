@@ -2,10 +2,11 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest'
 import {createApp,nextTick,type App} from 'vue'
 import TripBuilder from './components/TripBuilder.vue'
-import {api,confirmTrip} from './api'
+import {api,confirmTrip,beginConversation} from './api'
 import {ApiError} from './apiError'
 import {places,type Trip} from './domain'
-vi.mock('./api',()=>({api:vi.fn(),confirmTrip:vi.fn(),connection:{routing:'osrm'}}))
+vi.mock('./api',()=>({api:vi.fn(),confirmTrip:vi.fn(),connection:{routing:'osrm'},beginConversation:vi.fn()}))
+vi.mock('./components/AgentTrace.vue',()=>({default:{render:()=>null}}))
 vi.mock('./components/PlacePicker.vue',()=>({default:{render:()=>null}}))
 let app:App,host:HTMLDivElement
 const apiMock=vi.mocked(api),confirmMock=vi.mocked(confirmTrip)
@@ -16,7 +17,7 @@ const place=(id:string)=>places.find(p=>p.id===id)!
 const issue=(action='shorten',message='第一个冲突')=>({code:'day_overflow',severity:'error',message,options:[{action,activityId:'a',day:0,minutes:15}]})
 const trip=():Trip=>({id:'component-qa',title:'组件验收',city:'杭州',people:2,mode:'walk',revision:1,days:[{date:'2026-11-14',start:570,end:1110,activities:[{id:'a',placeId:'quyuan',duration:90,lock:'none'}]}]})
 const parsed=()=>({requirements:{startDate:'2026-11-14',days:1,people:2},missing:[],evidence:{},notes:[],suggestions:[],mentions:[{text:'校区',role:'visit',candidates:[place('quyuan'),place('baidi')]}]})
-beforeEach(()=>{vi.resetAllMocks();host=document.createElement('div');document.body.append(host);app=createApp(TripBuilder,{loggedIn:true,hasModel:false});app.mount(host)})
+beforeEach(()=>{vi.resetAllMocks();sessionStorage.removeItem('tripcanvas.conversation.active.v1');host=document.createElement('div');document.body.append(host);app=createApp(TripBuilder,{loggedIn:true,hasModel:false});app.mount(host)})
 afterEach(()=>{app.unmount();host.remove()})
 async function chooseAndGenerate(issues:unknown[]=[]){
  apiMock.mockImplementation(async(path)=>{
@@ -89,4 +90,14 @@ it('搜索没有可核验结果时展示原因，不提供确认保存按钮',as
  await click('生成多方案');expect(host.textContent).toContain('地图预算已满');expect(host.textContent).toContain('没有可核验的草案')
  expect([...host.querySelectorAll('button')].some(b=>b.textContent?.includes('确认并保存'))).toBe(false)
  expect(confirmMock).not.toHaveBeenCalled()
+})
+
+it('自由描述不需要先填日期即可启动，重复打开不创建新任务',async()=>{
+ app.unmount();app=createApp(TripBuilder,{loggedIn:true,hasModel:true});app.mount(host)
+ vi.mocked(beginConversation).mockResolvedValue({runId:'conversation-1',status:'running'})
+ const text=host.querySelector('textarea')!;text.value='想在杭州轻松逛逛，人还没约齐';text.dispatchEvent(new Event('input'));await nextTick()
+ await click('用 AI 对话规划')
+ expect(beginConversation).toHaveBeenCalledTimes(1);expect(beginConversation).toHaveBeenCalledWith('想在杭州轻松逛逛，人还没约齐','我的杭州慢游')
+ expect(sessionStorage.getItem('tripcanvas.conversation.active.v1')).toContain('conversation-1')
+ sessionStorage.removeItem('tripcanvas.conversation.active.v1')
 })

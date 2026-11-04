@@ -5,7 +5,7 @@ import time
 import uuid
 import math
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 
 from backend.db import Run, RunEvent, SessionLocal
 
@@ -55,6 +55,22 @@ class RunRecorder:
         with SessionLocal.begin() as session:
             session.add(Run(id=self.id, owner=owner, trip_id=trip_id, base_revision=base_revision,
                             result=json.dumps(self.result, ensure_ascii=False), created=time.time()))
+
+    @classmethod
+    def restore(cls, run_id):
+        recorder = cls.__new__(cls)
+        with SessionLocal() as session:
+            run = session.get(Run, run_id)
+            if run is None:raise ValueError('运行不存在')
+            recorder.id = run_id
+            recorder.seq = session.scalar(select(func.max(RunEvent.seq)).where(RunEvent.run_id == run_id)) or 0
+            recorder.result = json.loads(run.result)
+        return recorder
+
+    def restart(self):
+        self.result = {'kind': self.result.get('kind', 'agent'), 'status': 'running'}
+        self._store(self.result)
+        self.event('resumed')
 
     def event(self, phase: str, status: str = 'ok', detail: dict | None = None) -> int:
         self.seq += 1

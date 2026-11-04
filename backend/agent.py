@@ -20,6 +20,7 @@ from backend.runlog import encode_detail
 from backend.agent_schema import ACTIONS,decision_format
 
 MAX_STEPS = int(__import__('os').getenv('PLAN_AGENT_STEPS', '6'))
+MAX_TOTAL_STEPS = 12
 
 SYSTEM = '''你是杭州行程规划 Agent。每一步只输出一个 JSON 对象，不要 Markdown，不要解释。
 这是应用层 JSON 动作调度，不使用供应商原生 tool_calls；不要输出工具调用标记或分析文本。
@@ -141,20 +142,25 @@ def timeline(trip, routes):
     return days
 
 
-async def run_agent(data, router, recorder):
+async def run_agent(data, router, recorder, *, checkpoint=None, persist=None, preferences=''):
     """Execute up to MAX_STEPS model decisions; returns the public result dict."""
     validate_agent_request(data)
     data.requirements.mustVisitIds = [id for id in data.candidateIds if id not in data.optionalIds]
     candidates = [{'id': id, 'name': POIS[id]['name'], 'kind': POIS[id].get('kind', '地点'),
                    'required': id in data.requirements.mustVisitIds} for id in data.candidateIds]
-    messages = [
+    messages = checkpoint['messages'] if checkpoint else [
         {'role': 'system', 'content': SYSTEM},
         {'role': 'user', 'content': json.dumps({'requirements': data.requirements.model_dump(mode='json'),
-                                                'candidates': candidates, 'optionalIds': data.optionalIds}, ensure_ascii=False)},
+                                                'candidates': candidates, 'optionalIds': data.optionalIds,
+                                                'userPreferences': preferences[:6000]}, ensure_ascii=False)},
     ]
+    used = checkpoint.get('step', 0) if checkpoint else 0
+    def save(step):
+        if persist:persist({'messages': messages, 'step': step})
     toolbox = Toolbox(data, router)
     output_format = decision_format(data.candidateIds, sorted(toolbox.anchors))
-    for step in range(1, MAX_STEPS + 1):
+    for step in range(used + 1, min(used + MAX_STEPS, MAX_TOTAL_STEPS) + 1):
+        save(step)  # A provider attempt consumes budget even if the process stops.
         try:
             decision = await model_json_messages(messages, response_format=output_format)
         except HTTPException:
@@ -162,6 +168,7 @@ async def run_agent(data, router, recorder):
         except (ValueError, TypeError) as error:
             recorder.event('model_error', status='error', detail={'step': step, 'error': str(error)[:200]})
             messages.append({'role': 'user', 'content': 'observation: 输出不是有效的动作 JSON，请只输出一个 JSON 对象。'})
+            save(step)
             continue
         action = decision.get('action')
         args = decision.get('args') if isinstance(decision.get('args'), dict) else {}
@@ -170,10 +177,14 @@ async def run_agent(data, router, recorder):
             recorder.event('tool_result', status='error', detail={'step': step, 'ok': False, 'error': '未知动作'})
             messages += [{'role': 'assistant', 'content': _observation(decision)},
                          {'role': 'user', 'content': 'observation: ' + _observation({'ok': False, 'error': '未知动作，可用动作：' + ', '.join(ACTIONS)})}]
+            save(step)
             continue
         if action == 'need_input':
+            if step >= MAX_TOTAL_STEPS:break
             question = str(args.get('question', ''))[:300]
-            recorder.finish('needs_input', {'question': question})
+            messages.append({'role': 'assistant', 'content': _observation(decision)})
+            save(step)
+            recorder.finish('needs_input', {'question': question, 'modelSteps': step})
             return {'runId': recorder.id, 'status': 'needs_input', 'question': question}
         if action == 'give_up':
             reason = str(args.get('reason', '未说明'))[:300]
@@ -187,6 +198,7 @@ async def run_agent(data, router, recorder):
             recorder.event('tool_result', status='error', detail={'step': step, 'ok': False, 'error': str(detail)[:300]})
             messages += [{'role': 'assistant', 'content': _observation(decision)},
                          {'role': 'user', 'content': 'observation: ' + _observation({'ok': False, 'error': str(detail)[:300]})}]
+            save(step)
             continue
         if action == 'propose_plan' and outcome['ok']:
             trip, issues = outcome['trip'], outcome['issues']
@@ -201,6 +213,7 @@ async def run_agent(data, router, recorder):
         recorder.event('tool_result', detail={'step': step, 'ok': outcome['ok'], 'summary': outcome['summary']})
         messages += [{'role': 'assistant', 'content': _observation(decision)},
                      {'role': 'user', 'content': 'observation: ' + _observation({'ok': outcome['ok'], 'summary': outcome['summary']})}]
-    message = f'超过 {MAX_STEPS} 步仍未给出可行方案'
+        save(step)
+    message = f'本轮 {MAX_STEPS} 步或累计 {MAX_TOTAL_STEPS} 步预算已用完，仍未给出可行方案'
     recorder.finish('incomplete', {'message': message})
     return {'runId': recorder.id, 'status': 'incomplete', 'message': message}

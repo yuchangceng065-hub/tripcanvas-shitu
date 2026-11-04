@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import type { Proposal, Trip } from './domain'
+import type { Proposal, Trip, Place, Requirements } from './domain'
 import {ApiError,apiErrorMessage} from './apiError'
 const deployedAPI=import.meta.env.PROD?'https://tripcanvas-api.onrender.com/api/v1':''
 const base=(import.meta.env.VITE_API_BASE || deployedAPI || '/api/v1').replace(/\/$/,'')
@@ -36,7 +36,7 @@ export function checkAPI(force=false):Promise<Health|null>{
 }
 let token=''
 try{token=sessionStorage.getItem('tripcanvas.session')||''}catch{}
-export function setToken(value:string){token=value;try{if(value)sessionStorage.setItem('tripcanvas.session',value);else sessionStorage.removeItem('tripcanvas.session')}catch{}}
+export function setToken(value:string){if(value!==token){try{sessionStorage.removeItem('tripcanvas.conversation.active.v1');sessionStorage.removeItem('tripcanvas.agent.pending.v1')}catch{}}token=value;try{if(value)sessionStorage.setItem('tripcanvas.session',value);else sessionStorage.removeItem('tripcanvas.session')}catch{}}
 export async function api(path:string,method='GET',body?:unknown,signal?:AbortSignal){
  if(backendConfigured&&!await checkAPI())throw new Error('云端服务暂未连接，请点击重新连接；本地行程仍然保留。')
  const headers:Record<string,string>={'Content-Type':'application/json'}
@@ -95,7 +95,11 @@ export async function streamRun(runId:string,onEvent:(event:AgentEvent)=>void,si
   const tail=parseSSEBlock(buffer);if(tail)onEvent(tail)
  }finally{await reader.cancel().catch(()=>{});reader.releaseLock()}
 }
-export interface AgentRun {status:string;events?:AgentEvent[];validation?:unknown;error?:string;question?:string;message?:string}
+export interface ConversationView {version:number;status:string;phase:'intake'|'agent';messages:{role:'user'|'assistant';text:string}[];requirements:Omit<Partial<Requirements>,'city'>&{city?:string};mentions:{key:string;text:string;role:'visit'|'origin'|'destination';required:boolean;candidates:Place[];selectedId?:string;error?:string}[];missing:string[];question:string;notes:string[];canConfirm:boolean;remainingSteps:number;remainingReplies:number}
+export interface ConversationAnswer {version:number;requestId:string;text?:string;choices?:Record<string,string>;confirm?:boolean;retry?:boolean}
+export function beginConversation(text:string,title:string,signal?:AbortSignal):Promise<AgentStart>{return api('/planner/conversations','POST',{text,title},signal)}
+export function answerConversation(runId:string,body:ConversationAnswer,signal?:AbortSignal):Promise<AgentStart>{return api('/planner/conversations/'+encodeURIComponent(runId)+'/reply','POST',body,signal)}
+export interface AgentRun {conversation?:ConversationView;status:string;events?:AgentEvent[];validation?:unknown;error?:string;question?:string;message?:string}
 async function runPause(ms:number,signal?:AbortSignal){
  signal?.throwIfAborted()
  await new Promise<void>((resolve,reject)=>{

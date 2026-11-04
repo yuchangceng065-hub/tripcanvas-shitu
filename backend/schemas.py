@@ -121,3 +121,17 @@ class CoordinatesBody(StrictModel):
 
 class RequestBody(StrictModel):
     text: str = Field(min_length=2, max_length=1000)
+
+
+class ConversationStart(StrictModel):
+    text: str = Field(min_length=2, max_length=1000)
+    title: str = Field(default='我的杭州旅行', min_length=1, max_length=80)
+
+
+class ConversationReply(StrictModel):
+    version: int = Field(ge=1)
+    requestId: str = Field(min_length=8, max_length=80, pattern=r'^[A-Za-z0-9-]+$')
+    text: str = Field(default='', max_length=1000)
+    choices: dict[str, str] = Field(default_factory=dict, max_length=6)
+    confirm: bool = False
+    retry: bool = False

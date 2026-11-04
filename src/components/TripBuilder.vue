@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import {ref,computed,watch} from 'vue'
+import {ref,computed,watch,onMounted} from 'vue'
 import {Check,ArrowRight,ArrowLeft,LoaderCircle,Trash2,MapPin,AlertTriangle,Sparkles} from '@lucide/vue'
 import PlacePicker from './PlacePicker.vue'
 import AgentTrace from './AgentTrace.vue'
 import PlanComparison from './PlanComparison.vue'
 import type {PlanComparison as Comparison} from '../planningOptions'
 import {clone,places,placeById,registerPlaces,time,schedule,type Requirements,type Trip,type Place} from '../domain'
-import {api,confirmTrip} from '../api'
+import {api,confirmTrip,beginConversation} from '../api'
 import {walkingKm,type RoadRoute} from '../routes'
 import {ApiError} from '../apiError'
 import {candidateSelection,mentionKey} from '../candidateSelection'
@@ -16,6 +16,9 @@ type Role='visit'|'destination'|'origin'
 interface Mention {text:string;role:Role;candidates:Place[];error?:string}
 interface Parsed {requirements:Partial<Requirements>;evidence:Record<string,unknown>;missing:string[];mentions:Mention[];suggestions:Place[];notes:string[];search_source:string}
 const step=ref(0),intent=ref(''),title=ref('我的杭州慢游'),error=ref(''),busy=ref(false),parsing=ref(false),useModel=ref(props.hasModel),agentOpen=ref(false)
+const conversationId=ref(''),conversationOpen=ref(false),conversationBusy=ref(false)
+const recentConversations=ref<{runId:string;title:string;status:string}[]>([])
+const conversationKey='tripcanvas.conversation.active.v1'
 const req=ref<Requirements>({city:'杭州',startDate:'',days:2,people:2,mode:'walk',start:570,end:1110,pace:'balanced',interests:[],originPlaceId:null,destinationPlaceId:null,returnBy:null,walkBudgetKm:null})
 const manualIds=ref<string[]>([])
 const parsed=ref<Parsed|null>(null)
@@ -41,6 +44,24 @@ const evidence=computed(()=>{
 watch(()=>props.hasModel,value=>useModel.value=value)
 function minutes(value:string){const [h,m]=value.split(':').map(Number);return h!*60+m!}
 function updateTime(event:Event,key:'start'|'end'|'returnBy'){const value=(event.target as HTMLInputElement).value;req.value[key]=value?minutes(value):null as never}
+function resetConversation(){conversationId.value='';conversationOpen.value=false;try{sessionStorage.removeItem(conversationKey)}catch{}}
+function conversationCreated(trip:Trip){resetConversation();emit('created',trip)}
+async function converse(){
+ if(!props.loggedIn){emit('login');return}
+ if(conversationId.value){conversationOpen.value=true;return}
+ if(intent.value.trim().length<2){error.value='先写下你的出行想法，缺少的条件可以在对话中补充。';return}
+ conversationBusy.value=true;error.value=''
+ try{
+  const result=await beginConversation(intent.value.trim(),title.value)
+  conversationId.value=result.runId;conversationOpen.value=true
+  try{sessionStorage.setItem(conversationKey,JSON.stringify({id:result.runId}))}catch{}
+ }catch(e){error.value=(e as Error).message}
+ finally{conversationBusy.value=false}
+}
+async function loadRecent(){if(!props.loggedIn)return;try{const result=await api('/planner/conversations');if(Array.isArray(result))recentConversations.value=result}catch{}}
+function resumeConversation(id:string){conversationId.value=id;conversationOpen.value=true;try{sessionStorage.setItem(conversationKey,JSON.stringify({id}))}catch{}}
+onMounted(()=>{try{const saved=JSON.parse(sessionStorage.getItem(conversationKey)||'null');if(saved&&typeof saved.id==='string')conversationId.value=saved.id}catch{}void loadRecent()})
+watch(()=>props.loggedIn,value=>{if(value)void loadRecent();else{resetConversation();recentConversations.value=[]}})
 async function interpret(){
  if(parsing.value)return
  if(!props.loggedIn){emit('login');return}
@@ -179,12 +200,21 @@ async function save(){
 
   <template v-if="step===0">
    <label>出行想法
-    <textarea v-model="intent" rows="3" maxlength="1000" placeholder="例如：2026-11-14 去杭州两天，两个人，想去西湖和浙工大，喜欢咖啡，少走路，第二天 17:00 前到杭州东站。"/>
+    <textarea v-model="intent" :disabled="conversationOpen" rows="3" maxlength="1000" placeholder="例如：2026-11-14 去杭州两天，两个人，想去西湖和浙工大，喜欢咖啡，少走路，第二天 17:00 前到杭州东站。"/>
    </label>
+   <div class="conversation-entry">
+    <button class="button primary" @click="converse" :disabled="conversationBusy||!hasModel||conversationOpen"><LoaderCircle v-if="conversationBusy" class="spin" :size="14"/><Sparkles v-else :size="14"/>{{conversationBusy?'正在开启对话…':conversationId?'继续刚才的 AI 任务':'用 AI 对话规划'}}</button>
+    <button v-if="conversationId" class="text-button" @click="resetConversation" :disabled="conversationBusy">重新描述新任务</button>
+   </div>
+   <details v-if="recentConversations.length&&!conversationOpen" class="recent-conversations"><summary>继续最近的规划任务</summary><button v-for="item in recentConversations" :key="item.runId" class="button quiet full" @click="resumeConversation(item.runId)">{{item.title}} · {{item.status==='review'?'待确认':item.status==='needs_input'?'待回答':item.status==='running'?'处理中':'可继续'}}</button></details>
+   <p class="form-hint">可以先说想法，再补日期、人数和偏好。AI 会反问并搜索真实地点，你确认后再规划；支持杭州 1—3 日步行或自驾接驳。</p>
+   <AgentTrace v-if="conversationOpen&&conversationId" :key="conversationId" :initial-run-id="conversationId" :title="title" :requirements="req" :candidate-ids="[]" :logged-in="loggedIn" @created="conversationCreated"/>
+   <p v-if="conversationOpen&&error" class="form-error" role="alert">{{error}}</p>
+   <template v-if="!conversationOpen">
    <button class="button quiet small" @click="interpret" :disabled="parsing">
     <LoaderCircle v-if="parsing" class="spin" :size="14"/><Sparkles v-else :size="14"/>{{parsing?'正在识别并搜索地点…':'识别需求（规则解析）'}}
    </button>
-   <p class="form-hint">规则解析只提取文字里的条件，不会猜测日期或地点；识别出的地点需要你按校区、地址确认。</p>
+   <p class="form-hint">也可使用下方规则解析和手动表单。规则解析只提取文字里的条件，不会猜测日期或地点；识别出的地点需要你按校区、地址确认。</p>
 
    <template v-if="parsed">
     <div class="evidence"><span v-for="[label,ok] in evidence" :key="label" :class="{missing:!ok}">{{ok?'已识别':'未提及'}} · {{label}}</span></div>
@@ -231,6 +261,7 @@ async function save(){
    <p v-if="!req.destinationPlaceId&&req.returnBy!=null" class="form-hint">已填写最晚到达时间，请选择终点；不需要返程限制时请清空时间。</p>
    <p v-if="error" class="form-error" role="alert">{{error}}</p>
    <button class="button primary full" @click="next">确认需求，选择地点<ArrowRight :size="16"/></button>
+   </template>
   </template>
 
   <template v-else-if="step===1">

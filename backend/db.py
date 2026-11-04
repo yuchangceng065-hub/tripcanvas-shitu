@@ -120,3 +120,13 @@ class RunEvent(Base):
     status: Mapped[str] = mapped_column(String)
     detail: Mapped[str] = mapped_column(Text)
     created: Mapped[float] = mapped_column(Float)
+
+
+class PlanningSession(Base):
+    __tablename__ = 'planning_sessions'
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner: Mapped[str] = mapped_column(String, index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String)
+    state: Mapped[str] = mapped_column(Text)
+    updated: Mapped[float] = mapped_column(Float)

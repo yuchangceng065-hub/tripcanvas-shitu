@@ -2,7 +2,8 @@ import asyncio,json,os,time,uuid
 from fastapi import APIRouter,Depends,HTTPException,Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from backend.agent import run_agent,validate_agent_request
+from backend.agent import validate_agent_request
+from backend.conversation import create_session,load_session,public_session,claim_reply,schedule,recent_sessions
 from backend.alternatives import PlanSearch
 from backend.places import PLACES,POIS
 from backend.planning import AlternativesBody,DraftBody,evaluate,make_trip
@@ -11,9 +12,8 @@ from backend.app import (amap_enabled,current_user,db,draft_order,locked_violati
     model_api_key,model_json,persist_trip,remember_place,reserve_user_daily,route_body,
     snapshot,throttle,verify_proposal)
 from backend.db import Run,SessionLocal,TripRow,User
-from backend.model_metrics import current_metrics,empty_metrics
 from backend.runlog import RunRecorder,events_for,run_payload,decode_detail
-from backend.schemas import ConfirmBody,DayEdit,ModelResult,RequestBody,SuggestionBody,Trip,TripBody
+from backend.schemas import ConfirmBody,DayEdit,ModelResult,RequestBody,SuggestionBody,Trip,TripBody,ConversationStart,ConversationReply
 router=APIRouter()
 
 @router.post('/api/v1/planner/preview')
@@ -129,25 +129,42 @@ async def agent_plan(data:AlternativesBody,request:Request,user:User=Depends(cur
     if os.getenv('PLANNER_MODE','auto')=='rules' or not model_api_key() or not os.getenv('MODEL_BASE_URL') or not os.getenv('MODEL_NAME'):
         raise HTTPException(503,'尚未配置模型服务，Agent 不可用；规则草案仍可使用。')
     recorder=RunRecorder(user.id,'',0,'agent')
-    metrics=empty_metrics();state=request.app.state
-    async def work():
-        token=current_metrics.set(metrics)
-        try:
-            async with state.alternatives_lock:
-                await asyncio.wait_for(run_agent(data,state.router,recorder),timeout=240)
-        except TimeoutError:
-            recorder.fail('规划超过四分钟，已停止；请减少候选地点后重试。')
-        except HTTPException as error:
-            recorder.fail(error.detail)
-        except Exception as error:
-            recorder.fail(error)
-        finally:
-            recorder.patch({'modelUsage':metrics})
-            current_metrics.reset(token)
-    task=asyncio.create_task(work())
-    state.agent_tasks[recorder.id]=task
-    task.add_done_callback(lambda _:state.agent_tasks.pop(recorder.id,None))
+    create_session(recorder,user.id,{'phase':'agent','data':data.model_dump(mode='json'),'turns':[]})
+    schedule(request.app.state,recorder,1,load_session(recorder.id)['state'])
     return {'runId':recorder.id,'status':'running'}
+
+def require_model():
+    if os.getenv('PLANNER_MODE','auto')=='rules' or not model_api_key() or not os.getenv('MODEL_BASE_URL') or not os.getenv('MODEL_NAME'):
+        raise HTTPException(503,'自由对话需要可用的模型服务；规则规划仍可使用。')
+
+
+@router.post('/api/v1/planner/conversations')
+async def begin_conversation(data:ConversationStart,request:Request,user:User=Depends(current_user)):
+    throttle('agent:'+user.id,2);require_model()
+    if request.app.state.alternatives_lock.locked():raise HTTPException(429,'正在处理其他任务，请稍后重试')
+    reserve_user_daily(user.id,'agent',int(os.getenv('PLAN_AGENT_DAILY_LIMIT','6')))
+    recorder=RunRecorder(user.id,'',0,'conversation')
+    state={'phase':'intake','title':data.title,'turns':[{'role':'user','text':data.text.strip()}],
+           'interpret':True,'facts':None,'mentions':[],'choices':{},'replies':0}
+    create_session(recorder,user.id,state);schedule(request.app.state,recorder,1,state)
+    return {'runId':recorder.id,'status':'running'}
+
+
+@router.get('/api/v1/planner/conversations')
+def list_conversations(user:User=Depends(current_user)):
+    return recent_sessions(user.id)
+
+
+@router.post('/api/v1/planner/conversations/{id}/reply')
+async def answer_conversation(id:str,data:ConversationReply,request:Request,user:User=Depends(current_user)):
+    throttle('agent-answer:'+user.id,8);require_model()
+    # Ownership and idempotence are checked before scheduling another activation.
+    row,replay=claim_reply(id,user.id,data)
+    if not replay:
+        recorder=RunRecorder.restore(id);recorder.restart()
+        schedule(request.app.state,recorder,row['version'],row['state'])
+    return {'runId':id,'status':row['status'],'version':row['version'],'idempotent':replay}
+
 
 @router.post('/api/v1/planner/draft')
 async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
@@ -200,7 +217,12 @@ async def plan(data:SuggestionBody,request:Request,user:User=Depends(current_use
 def get_run(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
     r=s.get(Run,id)
     if not r or r.owner!=user.id:raise HTTPException(404,'运行不存在')
-    return run_payload(r,events_for(id))
+    payload=run_payload(r,events_for(id))
+    conversation=public_session(id)
+    if conversation:
+        payload['conversation']=conversation
+        if conversation['status']=='running':payload['status']='running'
+    return payload
 
 @router.get('/api/v1/runs/{id}/events')
 async def run_events(id:str,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
