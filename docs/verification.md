@@ -163,3 +163,11 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 用户配置 Groq Key 后，官方小型 JSON 请求 HTTP 200，约 3.56 秒，型号返回 openai/gpt-oss-20b。运行变量已切换官方 Groq 地址及型号，PLANNER_MODE=auto。实现提交 0359120，Render dep-dbllqes9v7es738smlgg live，Sites appgdep_6aeb5dbae2f081918e033933548fe189 succeeded。
 
 使用独立测试账户从线上 FastAPI 验收：health model=true / plannerMode=model / amap / PostgreSQL；真实模型草案 source=model，两处候选全部保留且无新增地点，路线 source=amap，单次约 1.00 秒；真实局部修改 source=model，将第一站停留减少 15 分钟，另一锁定活动和所有活动 ID 保持，单次约 2.42 秒；建议运行记录可重新读取，未确认建议没有写入正式旅行。上述耗时仅为本次样例，不代表持续性能保证。没有改动用户已有旅行，没有开通付费档。
+
+## 2026-11-05：主动搜索与真实方案比较
+
+新增 `/planner/alternatives`，候选集可区分必去与可选。有界搜索交错尝试三种目标，复用整日道路结果，重排、跨日和建议范围内调整停留；仅可选点能舍弃。所有展示方案经过完整道路与硬约束校验，相同结果合并，失败与未知不计为可行。
+
+前端新增比较卡片、逐日顺序、真实四项指标和取舍说明，切换只预览，确认后保存。101 项后端、75 项前端通过，类型检查与构建通过。测试会在应用导入前创建隔离临时库并清空真实供应商凭据，不依赖测试文件导入顺序或访问本地业务数据库。
+
+本地 IAB 浏览器验收真实 OSRM 三方案、切换、确认与刷新，截图位于任务 outputs/tripcanvas-alternatives-preview.png。线上高德与 Groq 复验另记。

@@ -17,7 +17,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker,
 from backend.routing import Router, RouteBody
 from backend.catalog import PlaceSearch
 from backend.amap import AmapService,RoutingGateway,enabled as amap_enabled,restricted_parking
-from backend.planning import Requirements, DraftBody, Order, check_order, evaluate, heuristic, make_trip
+from backend.planning import Requirements, DraftBody, AlternativesBody, Order, check_order, evaluate, heuristic, make_trip
+from backend.alternatives import PlanSearch
 from backend.requirements import parse_request
 from backend.model_config import model_api_key,model_key_name,model_options
 
@@ -96,6 +97,7 @@ class Run(Base):
 
 @asynccontextmanager
 async def lifespan(app):
+    app.state.alternatives_lock=asyncio.Lock()
     for attempt in range(5):
         try:
             Base.metadata.create_all(engine)
@@ -393,6 +395,8 @@ async def confirm(data:ConfirmBody,request:Request,user:User=Depends(current_use
             return {'trip':snapshot(candidate),'revision':target,'issues':[],'idempotent':True}
         if row.revision!=data.baseRevision:raise HTTPException(409,'旅行已被其他请求更新，请重新打开后再确认')
         before=Trip.model_validate_json(row.snapshot)
+        if before.requirements and before.requirements.mustVisitIds and (not trip.requirements or set(before.requirements.mustVisitIds)!=set(trip.requirements.mustVisitIds)):
+            raise HTTPException(422,detail={'code':'must_visit_changed','issues':[{'code':'must_visit_changed','severity':'error','message':'普通调整不能解除必去地点保护，请先在需求中明确修改','options':[]}]})
         if before.requirements and before.requirements.returnBy is not None and (
             not trip.requirements or trip.requirements.returnBy!=before.requirements.returnBy or
             trip.requirements.destinationPlaceId!=before.requirements.destinationPlaceId or trip.days[-1].date!=before.days[-1].date):
@@ -617,9 +621,7 @@ async def parse_requirements(data:RequestBody,request:Request,user:User=Depends(
     parsed['search_source']='amap' if amap_enabled() else 'photon'
     return parsed
 
-@app.post('/api/v1/planner/draft')
-async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
-    throttle('draft:'+user.id,6)
+async def draft_order(data,request):
     ids=data.candidateIds;r=data.requirements
     if len(set(ids))!=len(ids) or any(id not in POIS for id in ids+[x for x in (r.originPlaceId,r.destinationPlaceId) if x]):raise HTTPException(422,'请先搜索并确认所有地点，候选不可重复')
     if len(ids)<r.days:raise HTTPException(422,'候选地点数量不能少于旅行天数')
@@ -634,6 +636,29 @@ async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
         try:order=check_order(Order.model_validate(output).days,ids,r.days)
         except ValueError:raise HTTPException(422,'模型引入未知地点或遗漏候选，草案未保存，请重试')
         source='model'
+    return order,source,sort_pois
+
+@app.post('/api/v1/planner/alternatives')
+async def alternatives(data:AlternativesBody,request:Request,user:User=Depends(current_user)):
+    throttle('alternatives:'+user.id,2)
+    if request.app.state.alternatives_lock.locked():raise HTTPException(429,'正在核验其他方案，请稍后重试')
+    if len(data.candidateIds)>data.requirements.days*10:raise HTTPException(422,'候选过多，请减少地点或增加旅行天数，每日最多十个游览候选')
+    async with request.app.state.alternatives_lock:
+        data.requirements.mustVisitIds=[id for id in data.candidateIds if id not in data.optionalIds]
+        order,source,sort_pois=await draft_order(data,request)
+        anchors=[id for id in (data.requirements.originPlaceId,data.requirements.destinationPlaceId) if id]
+        if amap_enabled() and anchors:
+            coords=await request.app.state.amap.coordinates(anchors)
+            sort_pois={**sort_pois,**{id:{**POIS[id],'lng':coords[id][0],'lat':coords[id][1]} for id in anchors}}
+        search=PlanSearch(data,POIS,sort_pois,request.app.state.router.route,Trip.model_validate)
+        result=await search.search(order)
+        result['source']='model+search' if source=='model' else 'constraint-search'
+        return result
+
+@app.post('/api/v1/planner/draft')
+async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
+    throttle('draft:'+user.id,6)
+    order,source,_=await draft_order(data,request)
     trip=Trip.model_validate(make_trip(data,order,POIS));routes={}
     for i,day in enumerate(trip.days):
         if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(trip,day))

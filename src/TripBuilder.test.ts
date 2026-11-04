@@ -56,3 +56,28 @@ it('最终确认被服务端拒绝时，回填新的修复选项供继续调整'
  await chooseAndGenerate();confirmMock.mockRejectedValueOnce(new ApiError(422,'最新路况导致冲突',{issues:[issue('extend_day','最新路况导致冲突')],routes:{}}))
  await click('确认并保存');expect(host.textContent).toContain('最新路况导致冲突');expect(button('当天结束延后')).toBeDefined();expect(button('确认并保存').disabled).toBe(true)
 })
+
+it('多方案切换只更新预览，不写旅行；可选标记随请求提交',async()=>{
+ await chooseAndGenerate()
+ await click('返回调整')
+ const optional=host.querySelector<HTMLInputElement>('.optional-choice input')!;optional.click();await nextTick()
+ const first=trip(),second=trip();second.days[0]!.activities[0]!.duration=60
+ const metric={walkingKm:1,travelMinutes:15,visitMinutes:90,freeMinutes:300,days:[{day:0,walkingKm:1,travelMinutes:15,visitMinutes:90,freeMinutes:300,finish:720,overMinutes:0,waitingMinutes:0}]}
+ apiMock.mockResolvedValueOnce({options:[{id:'less-walking',label:'少走路',trip:first,routes:{},issues:[],metrics:metric,includedIds:['quyuan'],omittedIds:[]},{id:'relaxed',label:'轻松休闲',trip:second,routes:{},issues:[],metrics:{...metric,visitMinutes:60,freeMinutes:330},includedIds:['quyuan'],omittedIds:[]}],diagnostic:null,source:'constraint-search',unavailable:[],metricNote:'真实道路',warnings:[],search:{evaluatedStates:4,dayRouteQueries:2,maxDayRouteQueries:12,limited:false,reason:null,routeFailures:[]}})
+ await click('生成多方案')
+ expect(apiMock).toHaveBeenLastCalledWith('/planner/alternatives','POST',expect.objectContaining({optionalIds:['quyuan']}))
+ expect(host.querySelectorAll('.plan-option')).toHaveLength(2);expect(host.querySelector('.plan-option.chosen')?.textContent).toContain('少走路')
+ const switcher=host.querySelectorAll<HTMLButtonElement>('.plan-option button')[1]!;switcher.click();await flush()
+ expect(host.querySelector('.plan-option.chosen')?.textContent).toContain('轻松休闲')
+ expect(host.querySelector('.draft-day')?.textContent).toContain('60 分钟');expect(confirmMock).not.toHaveBeenCalled()
+ confirmMock.mockResolvedValue({trip:second,revision:1,issues:[],idempotent:false});await click('确认并保存')
+ expect(confirmMock).toHaveBeenCalledWith(second,0)
+})
+
+it('搜索没有可核验结果时展示原因，不提供确认保存按钮',async()=>{
+ await chooseAndGenerate();await click('返回调整')
+ apiMock.mockResolvedValueOnce({options:[],diagnostic:null,source:'constraint-search',unavailable:[{id:'less-walking',reason:'地图预算已满'}],metricNote:'真实道路',warnings:[],search:{evaluatedStates:1,dayRouteQueries:1,maxDayRouteQueries:12,limited:true,reason:'地图预算已满',routeFailures:[]}})
+ await click('生成多方案');expect(host.textContent).toContain('地图预算已满');expect(host.textContent).toContain('没有可核验的草案')
+ expect([...host.querySelectorAll('button')].some(b=>b.textContent?.includes('确认并保存'))).toBe(false)
+ expect(confirmMock).not.toHaveBeenCalled()
+})

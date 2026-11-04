@@ -2,6 +2,8 @@
 import {ref,computed,watch} from 'vue'
 import {Check,ArrowRight,ArrowLeft,LoaderCircle,Trash2,MapPin,AlertTriangle,Sparkles} from '@lucide/vue'
 import PlacePicker from './PlacePicker.vue'
+import PlanComparison from './PlanComparison.vue'
+import type {PlanComparison as Comparison} from '../planningOptions'
 import {clone,places,placeById,registerPlaces,time,schedule,type Requirements,type Trip,type Place} from '../domain'
 import {api,confirmTrip} from '../api'
 import {walkingKm,type RoadRoute} from '../routes'
@@ -19,6 +21,8 @@ const parsed=ref<Parsed|null>(null)
 const chosen=ref<Record<string,string>>({})
 const candidateIds=computed(()=>candidateSelection(manualIds.value,parsed.value?.mentions??[],chosen.value,[req.value.originPlaceId,req.value.destinationPlaceId]))
 const reviewRequired=ref(false),repairSummary=ref('')
+const optionalIds=ref<string[]>([]),comparison=ref<Comparison|null>(null),selectedOption=ref('')
+watch(candidateIds,ids=>optionalIds.value=optionalIds.value.filter(id=>ids.includes(id)))
 interface RepairOption {action:string;activityId?:string;minutes?:number;day?:number}
 interface DraftIssue {message:string;severity?:'error'|'warning';code?:string;options?:RepairOption[]}
 const draft=ref<{trip:Trip;source:string;issues:DraftIssue[];warnings:string[];routes?:Record<string,RoadRoute>}|null>(null)
@@ -77,7 +81,7 @@ function next(){
 async function generate(){
  if(busy.value)return
  if(!props.loggedIn){emit('login');return}
- busy.value=true;error.value='';draft.value=null
+ busy.value=true;error.value='';draft.value=null;comparison.value=null;selectedOption.value=''
  try{
   const walkBudgetKm=typeof req.value.walkBudgetKm==='number'&&req.value.walkBudgetKm>=0.5?req.value.walkBudgetKm:null
   const data=await api('/planner/draft','POST',{title:title.value,requirements:{...req.value,walkBudgetKm},candidateIds:candidateIds.value,useModel:useModel.value})
@@ -85,6 +89,27 @@ async function generate(){
   draft.value=data;reviewRequired.value=false;repairSummary.value='';step.value=2
  }catch(e){error.value=(e as Error).message}
  finally{busy.value=false}
+}
+
+async function comparePlans(){
+ if(busy.value)return
+ if(!props.loggedIn){emit('login');return}
+ busy.value=true;error.value='';draft.value=null;comparison.value=null;selectedOption.value=''
+ try{
+  const result:Comparison=await api('/planner/alternatives','POST',{title:title.value,requirements:{...req.value,walkBudgetKm:req.value.walkBudgetKm||null},candidateIds:candidateIds.value,optionalIds:optionalIds.value,useModel:useModel.value})
+  comparison.value=result
+  for(const option of result.options)registerPlaces(option.trip.placeSnapshots)
+  if(result.options.length)selectOption(result.options[0]!.id,true)
+  else if(result.diagnostic){registerPlaces(result.diagnostic.trip.placeSnapshots);draft.value={...result.diagnostic,source:result.source,warnings:result.warnings};reviewRequired.value=false}
+  step.value=2
+ }catch(e){error.value=(e as Error).message}
+ finally{busy.value=false}
+}
+function selectOption(id:string,initial=false){
+ if(busy.value&&!initial)return
+ const option=comparison.value?.options.find(item=>item.id===id);if(!option)return
+ draft.value={...clone(option),source:comparison.value!.source,warnings:comparison.value!.warnings}
+ selectedOption.value=id;reviewRequired.value=false;repairSummary.value='';error.value=''
 }
 
 function draftWalk(day:number):number|null{
@@ -113,6 +138,7 @@ async function applyRepair(option:RepairOption){
  if(!draft.value||busy.value)return
  if(option.action==='retry_route'){await recheck(draft.value.trip);return}
  const next=clone(draft.value.trip)
+ selectedOption.value=''
  if(option.action==='shorten'&&option.activityId){
   for(const day of next.days){const activity=day.activities.find(item=>item.id===option.activityId);if(activity){activity.duration=Math.max(15,activity.duration-(option.minutes||0));break}}
  } else if(option.action==='extend_day'&&option.day!==undefined){
@@ -192,7 +218,7 @@ async function save(){
     <label>节奏<select v-model="req.pace"><option value="relaxed">轻松</option><option value="balanced">适中</option><option value="full">充实</option></select></label>
    </div>
    <label>每日步行预算（公里，可选）<input type="number" min="0.5" max="30" step="0.5" v-model.number="req.walkBudgetKm" placeholder="留空表示不限制"/></label>
-   <p class="form-hint">预算按高德分段路线中的步行接驳累计；无法拆分步行距离时会明确跳过检查。</p>
+   <p class="form-hint">预算按高德分段路线中的步行接驳累计；无法拆分步行距离时，不能确认满足预算。</p>
    <div class="field-label">兴趣偏好
     <div class="interest-options"><label v-for="interest in ['咖啡','拍照','博物馆','美术','自然','美食']" :key="interest"><input type="checkbox" :value="interest" v-model="req.interests"/>{{interest}}</label></div>
    </div>
@@ -209,9 +235,10 @@ async function save(){
    <div class="requirements-summary">{{req.startDate}} · {{req.days}} 天 · {{req.people}} 人 · {{req.mode==='walk'?'步行':'驾车'}} · {{time(req.start)}}—{{time(req.end)}}<span>{{req.interests.join(' / ')||'无特别偏好'}}{{req.walkBudgetKm?' · 步行预算 '+req.walkBudgetKm+' km':''}}{{req.returnBy!==null?' · 最晚 '+time(req.returnBy!)+' 到达':''}}</span></div>
    <div class="candidate-list">
     <strong>游览候选 · {{candidateIds.length}} 个</strong>
-    <p v-for="p in selected" :key="p.id"><MapPin :size="13"/><span>{{p.name}}</span><button @click="removeCandidate(p.id)" :aria-label="`移除候选${p.name}`"><Trash2 :size="13"/></button></p>
+    <p v-for="p in selected" :key="p.id"><MapPin :size="13"/><span>{{p.name}}</span><label class="optional-choice"><input type="checkbox" v-model="optionalIds" :value="p.id"/>可选</label><button @click="removeCandidate(p.id)" :aria-label="`移除候选${p.name}`"><Trash2 :size="13"/></button></p>
     <p v-if="!candidateIds.length" class="form-hint">还没有候选地点：先确认上方识别出的地点，或用下面的搜索添加。</p>
    </div>
+   <p class="form-hint">多方案默认将候选视为必去；勾选“可选”才允许某套方案舍弃它。会尝试跨日分配、顺序与合理停留范围，保留固定返程和时间条件。</p>
    <p v-if="req.originPlaceId||req.destinationPlaceId" class="form-hint">起终点会独立添加，请从游览候选中移除同一地点。</p>
    <PlacePicker :selected="candidateIds" @choose="choose"/>
    <template v-if="parsed&&parsed.suggestions.length">
@@ -225,12 +252,16 @@ async function save(){
     <button class="button quiet" @click="step=0" :disabled="busy"><ArrowLeft :size="15"/>修改需求</button>
     <button class="button primary" @click="generate" :disabled="busy||candidateIds.length<req.days"><LoaderCircle v-if="busy" class="spin" :size="15"/>{{busy?'生成并核验道路…':loggedIn?'生成草案':'先登录再生成'}}</button>
    </div>
+   <button class="button primary full compare-start" @click="comparePlans" :disabled="busy||candidateIds.length<req.days"><LoaderCircle v-if="busy" class="spin" :size="15"/>{{busy?'正在搜索并核验可行方案…':'生成多方案 · 主动协调'}}</button>
+   <p class="form-hint">多方案需要查询真实道路，复杂行程可能需要一两分钟；搜索有上限，不保证全局最优。</p>
   </template>
 
-  <template v-else-if="draft">
+  <PlanComparison v-if="step===2&&comparison" :comparison="comparison" :selected="selectedOption" :busy="busy" @choose="selectOption"/>
+  <p v-if="step===2&&comparison&&!draft" class="form-error">当前没有可核验的草案，请减少候选、调整交通条件或稍后重试。<button class="button quiet" @click="step=1">返回调整</button></p>
+  <template v-if="step===2&&draft">
    <p v-if="repairSummary" class="form-hint" role="status">{{repairSummary}}</p>
    <p v-if="reviewRequired" class="form-error">修改后的道路和时间尚未核验，不能确认保存。<button class="button quiet small" @click="recheck(draft.trip)" :disabled="busy">重新核验当前草案</button></p>
-   <p class="draft-source">{{draft.source==='model'?'模型生成 · 程序已校验道路':'规则草案 · 已校验道路用时'}}</p>
+   <p class="draft-source">{{draft.source.includes('search')?'主动协调草案 · 道路与硬约束已核验':draft.source==='model'?'模型生成 · 程序已校验道路':'规则草案 · 已校验道路用时'}}</p>
    <section v-for="(day,i) in draft.trip.days" :key="day.date" class="draft-day">
     <h3>Day {{i+1}} · {{day.date}}<small v-if="draftWalk(i)!==null">步行约 {{draftWalk(i)!.toFixed(1)}} km</small></h3>
     <p v-for="entry in draftEntries(i)" :key="entry.activity.id"><span>{{entry.place.name}}</span><small>{{!reviewRequired?time(entry.start)+'—'+time(entry.end)+' · ':''}}{{entry.activity.duration}} 分钟{{entry.activity.lock==='fixed'?' · 固定到达 '+time(entry.activity.fixedStart!):''}}</small></p>

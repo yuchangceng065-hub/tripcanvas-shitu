@@ -19,6 +19,7 @@ class Requirements(BaseModel):
     destinationPlaceId:str|None=None
     returnBy:int|None=Field(default=None,ge=0,le=1439)
     walkBudgetKm:float|None=Field(default=None,ge=0.5,le=30)
+    mustVisitIds:list[str]=Field(default_factory=list,max_length=18)
     @model_validator(mode='after')
     def valid(self):
         if self.end<=self.start:raise ValueError('结束时间须晚于出发时间')
@@ -34,6 +35,13 @@ class DraftBody(BaseModel):
 class Order(BaseModel):
     model_config=ConfigDict(extra='forbid')
     days:list[list[str]]=Field(min_length=1,max_length=3)
+
+class AlternativesBody(DraftBody):
+    optionalIds:list[str]=Field(default_factory=list,max_length=18)
+    @model_validator(mode='after')
+    def optional_subset(self):
+        if len(set(self.optionalIds))!=len(self.optionalIds) or not set(self.optionalIds)<=set(self.candidateIds):raise ValueError('可选地点必须属于已确认的候选集合且不可重复')
+        return self
 
 def check_order(order,ids,count):
     flat=[id for day in order for id in day]
@@ -55,7 +63,7 @@ def make_trip(body,order,pois):
     import uuid
     r=body.requirements;days=[]
     for i,ids in enumerate(order):
-        activities=[{'id':str(uuid.uuid4()),'placeId':id,'duration':min(pois[id]['duration'],60 if r.pace=='full' else 90),'lock':'none'} for id in ids]
+        activities=[{'id':str(uuid.uuid4()),'placeId':id,'duration':min(pois[id]['duration'],60 if r.pace=='full' else 90),'lock':'keep' if id in r.mustVisitIds else 'none'} for id in ids]
         if i==0 and r.originPlaceId:activities.insert(0,{'id':str(uuid.uuid4()),'placeId':r.originPlaceId,'duration':15,'lock':'keep'})
         if i==r.days-1 and r.destinationPlaceId:
             a={'id':str(uuid.uuid4()),'placeId':r.destinationPlaceId,'duration':15,'lock':'fixed' if r.returnBy is not None else 'keep'}
@@ -91,6 +99,12 @@ def evaluate(trip,routes,pois):
     """One authoritative hard-constraint pass. Unknown roads never count as feasible."""
     issues=[]
     requirements=getattr(trip,'requirements',None)
+    if requirements:
+        present=[a.placeId for d in trip.days for a in d.activities]
+        for id in requirements.mustVisitIds:
+            if present.count(id)!=1:
+                issues.append({'code':'must_visit_missing','severity':'error','day':None,'activityId':None,
+                    'message':f'必去地点 {pois.get(id,{}).get("name",id)} 必须保留且仅安排一次','options':[]})
     if requirements and requirements.returnBy is not None:
         final=trip.days[-1]
         destination=next((a for a in final.activities if a.placeId==requirements.destinationPlaceId),None)
@@ -136,7 +150,10 @@ def evaluate(trip,routes,pois):
         requirements=getattr(trip,'requirements',None)
         budget=getattr(requirements,'walkBudgetKm',None) if requirements else None
         if budget is not None:
-            distance=walking_km(route,getattr(trip,'mode','walk'))
+            distance=walking_km(route,getattr(trip,'mode','walk')) if len(day.activities)>1 else 0
+            if distance is None:
+                issues.append({'code':'walk_budget_unknown','severity':'error','day':index,'activityId':None,
+                    'message':f'第 {index+1} 天无法分离步行接驳距离，暂不能确认满足步行预算','options':[]})
             if distance is not None and distance>budget+0.05:
                 issues.append({'code':'walk_budget','severity':'error','day':index,'activityId':None,
                     'message':f'第 {index+1} 天步行约 {distance:.1f} km，超过每日预算 {budget:g} km',

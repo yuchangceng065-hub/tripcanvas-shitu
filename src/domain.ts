@@ -5,7 +5,7 @@ export type Lock = 'none' | 'keep' | 'fixed'
 export interface Place {id:string;name:string;kind:string;tag:string;description:string;duration:number;cost:number;lng:number;lat:number;x:number;y:number;indoor:boolean;image:string;coordinateSource?:string;crs?:string;address?:string;provider?:string;retrievedAt?:number;costKnown?:boolean;amapId?:string;restrictedAccess?:boolean;entrance?:[number,number];exit?:[number,number];routingLocation?:[number,number]}
 export interface Activity {id:string;placeId:string;duration:number;lock:Lock;fixedStart?:number}
 export interface Day {date:string;start:number;end:number;activities:Activity[]}
-export interface Requirements {city:'杭州';startDate:string;days:number;people:number;mode:'walk'|'drive';start:number;end:number;pace:'relaxed'|'balanced'|'full';interests:string[];originPlaceId?:string|null;destinationPlaceId?:string|null;returnBy?:number|null;walkBudgetKm?:number|null}
+export interface Requirements {city:'杭州';startDate:string;days:number;people:number;mode:'walk'|'drive';start:number;end:number;pace:'relaxed'|'balanced'|'full';interests:string[];originPlaceId?:string|null;destinationPlaceId?:string|null;returnBy?:number|null;walkBudgetKm?:number|null;mustVisitIds?:string[]}
 export interface Mobility {parkingByPlace:Record<string,string>;parkingMinutes:number}
 export interface Trip {id:string;title:string;city:string;people:number;mode:'walk'|'drive';days:Day[];revision:number;requirements?:Requirements|null;placeSnapshots?:Place[];mobility?:Mobility|null}
 export interface Entry {activity:Activity;place:Place;start:number;end:number;earliest:number;travel:number;distance:number;conflict:boolean}

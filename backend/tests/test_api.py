@@ -1,5 +1,4 @@
 import copy, os, tempfile, uuid
-os.environ['DATABASE_URL']='sqlite:///'+tempfile.mktemp(suffix='.db')
 from fastapi.testclient import TestClient
 from backend.app import app,Trip,verify_proposal,issues,attempts
 import pytest
@@ -154,6 +153,7 @@ def test_model_parser_accepts_only_complete_json_objects():
         with pytest.raises(ValueError):parse_model_json(content,reason)
 
 def test_free_glm_disables_thinking_and_repairs_locked_edit_once(client,monkeypatch):
+    monkeypatch.setenv('PLANNER_MODE','auto')
     import backend.app as module
     import httpx,json
     register(client);t=trip();t['days'][0]['activities'].append({'id':'c','placeId':'museum','duration':60,'lock':'none'})
@@ -486,3 +486,36 @@ def test_groq_health_requires_groq_key_not_previous_provider(client,monkeypatch)
  assert client.get('/api/v1/health').json()['model'] is False
  monkeypatch.setenv('GROQ_API_KEY','test-groq-key')
  assert client.get('/api/v1/health').json()['model'] is True
+
+def alternative_body():
+ return {'title':'方案比较','requirements':{'city':'杭州','startDate':'2026-11-14','days':1,'people':2,'mode':'walk','start':540,'end':1110},'candidateIds':['quyuan','museum','art','leifeng'],'optionalIds':['art','leifeng'],'useModel':False}
+
+def test_alternatives_are_read_only_and_confirm_keeps_required_places(client,monkeypatch):
+ register(client)
+ async def roads(body):return {'source':'amap','crs':'GCJ02','legs':[{'minutes':10,'distance':.6,'segments':[{'mode':'walk','minutes':10,'distance':.6}]} for _ in body.placeIds[1:]]}
+ monkeypatch.setattr(app.state.router,'route',roads)
+ r=client.post('/api/v1/planner/alternatives',json=alternative_body());assert r.status_code==200,r.text
+ data=r.json();assert len(data['options'])==3;assert data['source']=='constraint-search'
+ option=data['options'][0];t=option['trip']
+ assert set(t['requirements']['mustVisitIds'])=={'quyuan','museum'}
+ assert client.get('/api/v1/trips/'+t['id']).status_code==404
+ assert client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0}).status_code==200
+ saved=client.get('/api/v1/trips/'+t['id']).json();assert saved['requirements']['mustVisitIds']==t['requirements']['mustVisitIds']
+ changed=copy.deepcopy(t);changed['requirements']['mustVisitIds']=[]
+ assert client.post('/api/v1/planner/confirm',json={'trip':changed,'baseRevision':1}).status_code==422
+ missing=copy.deepcopy(t);missing['id']=str(uuid.uuid4());missing['days'][0]['activities']=[a for a in missing['days'][0]['activities'] if a['placeId']!='quyuan']
+ result=client.post('/api/v1/planner/confirm',json={'trip':missing,'baseRevision':0})
+ assert result.status_code==422 and 'must_visit_missing' in [i['code'] for i in result.json()['detail']['issues']]
+
+def test_alternatives_require_login_and_validate_optional_subset(client):
+ assert client.post('/api/v1/planner/alternatives',json=alternative_body()).status_code==401
+ register(client);body=alternative_body();body['optionalIds']=['not-confirmed']
+ assert client.post('/api/v1/planner/alternatives',json=body).status_code==422
+
+def test_alternatives_report_provider_failure_without_feasible_options(client,monkeypatch):
+ from fastapi import HTTPException
+ register(client);calls=[]
+ async def failed(body):calls.append(1);raise HTTPException(429,'地图预算已满')
+ monkeypatch.setattr(app.state.router,'route',failed)
+ r=client.post('/api/v1/planner/alternatives',json=alternative_body());assert r.status_code==200
+ data=r.json();assert not data['options'];assert data['search']['limited'];assert len(calls)==1
