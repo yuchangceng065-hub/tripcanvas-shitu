@@ -1,9 +1,10 @@
 import { reactive } from 'vue'
 import type { Proposal, Trip } from './domain'
+import {ApiError,apiErrorMessage} from './apiError'
 const deployedAPI=import.meta.env.PROD?'https://tripcanvas-api.onrender.com/api/v1':''
 const base=(import.meta.env.VITE_API_BASE || deployedAPI || '/api/v1').replace(/\/$/,'')
 export const backendConfigured=!!(import.meta.env.VITE_API_BASE||deployedAPI)
-export const connection=reactive({status:'idle' as 'idle'|'checking'|'waking'|'online'|'offline'|'local',attempt:0})
+export const connection=reactive({status:'idle' as 'idle'|'checking'|'waking'|'online'|'offline'|'local',attempt:0,model:false})
 export let apiAvailable=false
 interface Health {status:'ok';model:boolean;storage?:string}
 let healthPromise:Promise<Health|null>|undefined,lastHealth:Health|null=null,lastChecked=0
@@ -20,7 +21,7 @@ export function checkAPI(force=false):Promise<Health|null>{
     const r=await fetch(base+'/health',{cache:'no-store',signal:AbortSignal.timeout(Math.max(1,Math.min(15000,deadline-Date.now())))})
     if(r.ok&&r.headers.get('content-type')?.includes('application/json')){
      const data=await r.json()
-     if(data.status==='ok'){apiAvailable=true;connection.status='online';lastHealth=data;return data}
+     if(data.status==='ok'){apiAvailable=true;connection.status='online';connection.model=!!data.model;lastHealth=data;return data}
     }
     // Invalid configuration / denied access should not look like a slow cold start.
     if([400,401,403,404].includes(r.status))break
@@ -44,7 +45,9 @@ export async function api(path:string,method='GET',body?:unknown,signal?:AbortSi
  try{r=await fetch(base+path,{method,credentials:'include',headers,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(path==='/planner/draft'?150000:90000)]):AbortSignal.timeout(path==='/planner/draft'?150000:90000),body:body===undefined?undefined:JSON.stringify(body)})}
  catch(e){if(signal?.aborted)throw e;lastChecked=0;connection.status='offline';apiAvailable=false;throw new Error(method==='GET'?'网络连接失败，请重试':'未能确认云端操作结果，请重新连接后检查；本地行程仍保留。')}
  let d:any;try{d=await r.json()}catch{lastChecked=0;connection.status='offline';apiAvailable=false;throw new Error('云端服务暂不可用，请重新连接后重试')}
- if(!r.ok){if(r.status===401)setToken('');if(r.status>=500){lastChecked=0;connection.status='offline';apiAvailable=false}throw new Error(typeof d.detail==='string'?d.detail:'请求未能完成')}
+ // An HTTP error from a running API (for example model quota exhaustion) is
+ // different from a network outage. Keep POI search, auth and routing usable.
+ if(!r.ok){if(r.status===401)setToken('');throw new ApiError(r.status,apiErrorMessage(d.detail,r.status))}
  return d
 }
 export async function remoteSuggestion(trip:Trip,day:number,prompt:string):Promise<Proposal>{return api('/planner/suggest','POST',{trip,day,prompt})}

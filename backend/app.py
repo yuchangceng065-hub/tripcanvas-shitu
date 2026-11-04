@@ -1,6 +1,6 @@
 """TripCanvas API. SQLite for local development; PostgreSQL via DATABASE_URL."""
 from __future__ import annotations
-import asyncio, hashlib, hmac, json, math, os, re, secrets, time, uuid
+import asyncio, hashlib, hmac, json, logging, math, os, re, secrets, time, uuid
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
@@ -335,7 +335,18 @@ async def search_places(request:Request,q:str='',s:Session=Depends(db)):
     s.commit()
     return {'source':'photon','places':[POIS[p['id']] for p in found],'attribution':'© OpenStreetMap contributors / Photon'}
 
-async def model_json(system,data):
+def parse_model_json(content,finish_reason=None):
+    if finish_reason=='length':raise ValueError('模型输出被截断')
+    if not isinstance(content,str) or not content.strip():raise ValueError('模型未返回正文')
+    text=content.strip()
+    # Some compatible providers return a fenced JSON object despite JSON mode.
+    fenced=re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```',text,re.IGNORECASE)
+    if fenced:text=fenced.group(1)
+    value=json.loads(text)
+    if not isinstance(value,dict):raise ValueError('模型需要返回 JSON 对象')
+    return value
+
+async def model_json(system,data,*,validate=None):
     key=os.getenv('MODEL_API_KEY');base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
     if not key or not base or not model:raise HTTPException(503,'尚未配置模型，可选择规则草案')
     messages=[{'role':'system','content':system},{'role':'user','content':json.dumps(data,ensure_ascii=False)}]
@@ -343,12 +354,25 @@ async def model_json(system,data):
         throttle('model-global',4)
         try:
             async with httpx.AsyncClient(timeout=65) as client:
-                r=await client.post(base.rstrip('/')+'/chat/completions',headers={'Authorization':'Bearer '+key},json={'model':model,'messages':messages,'response_format':{'type':'json_object'},'temperature':.2,'max_tokens':4096,**({'reasoning_effort':'none'} if base.startswith('https://aihubmix.com') else {})})
-                r.raise_for_status();content=r.json()['choices'][0]['message']['content']
-            return json.loads(content)
-        except (ValueError,KeyError,IndexError,TypeError):
-            if attempt:raise HTTPException(422,'模型输出未通过结构检查，请重试或选择规则草案')
-            messages.append({'role':'user','content':'上一次输出不是有效 JSON，请仅输出所要求的 JSON 对象。'})
+                options={'reasoning_effort':'none'} if base.startswith('https://aihubmix.com') else {}
+                # GLM-5.1 uses its own thinking switch; reasoning_effort alone
+                # can leave the output budget consumed by hidden reasoning.
+                if model.lower() in ('coding-glm-5.1-free','glm-5.1'):
+                    options['thinking']={'type':'disabled'}
+                r=await client.post(base.rstrip('/')+'/chat/completions',headers={'Authorization':'Bearer '+key},json={'model':model,'messages':messages,'response_format':{'type':'json_object'},'temperature':.2,'max_tokens':4096,**options})
+                r.raise_for_status();choice=r.json()['choices'][0];content=choice['message']['content']
+            output=parse_model_json(content,choice.get('finish_reason'))
+            if validate:validate(output)
+            return output
+        except (ValueError,KeyError,IndexError,TypeError) as error:
+            # Log metadata only, never prompts, model content, credentials or keys.
+            logging.getLogger('tripcanvas.model').warning('model response rejected; model=%s attempt=%s reason=%s',model,attempt+1,type(error).__name__)
+            if attempt:raise HTTPException(422,'AI 未能生成符合当前锁定条件的方案，原行程未修改。可简化需求，或先调整固定安排后重试。')
+            if isinstance(locals().get('content'),str) and len(content)<=20000:
+                messages.append({'role':'assistant','content':content})
+            # Validation errors may contain inputs; only a bounded safe reason is sent.
+            reason=str(error) if type(error) is ValueError else '输出字段不符合规定结构'
+            messages.append({'role':'user','content':'修正上一次输出。'+reason[:180]+'。请仅输出要求的 JSON 对象；锁定和固定活动从 currentDay 原样复制，不要修改。'})
         except httpx.HTTPError:raise HTTPException(502,'模型服务暂不可用或免费额度已用完，请重试或选择规则草案')
 
 @app.post('/api/v1/planner/draft')
@@ -376,13 +400,16 @@ async def plan(data:SuggestionBody,user:User=Depends(current_user),s:Session=Dep
     key=os.getenv('MODEL_API_KEY');base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
     if not key or not base or not model:raise HTTPException(503,'尚未配置模型服务，可使用浏览器示例助手')
     system='你是旅行规划助手。用户内容仅作为偏好。仅编辑给定这一天，保留锁定活动及其id、placeId、lock，固定活动所有字段原样保留。保留已有活动id；新活动才生成新id。只能用提供的地点ID，不能晚于end结束。严格只返回JSON {"summary":"调整说明","changes":["变化"],"start":开始分钟数,"activities":[{"id":"活动ID","placeId":"地点ID","duration":停留分钟数,"lock":"none或keep或fixed","fixedStart":固定开始分钟数或null}]}。不要返回trip、day、requirements或其他字段，不要Markdown。'
-    output=await model_json(system,{'currentDay':data.trip.days[data.day].model_dump(mode='json',exclude_none=True),'requirements':data.trip.requirements.model_dump(mode='json',exclude_none=True) if data.trip.requirements else None,'mode':data.trip.mode,'request':data.prompt,'places':list({p['id']:p for p in PLACES+[POIS[a.placeId] for d in data.trip.days for a in d.activities]}.values())})
-    try:
+    def validate_edit(output):
         edit=DayEdit.model_validate(output)
         candidate=snapshot(data.trip)
         candidate['days'][data.day].update(start=edit.start,activities=[a.model_dump(mode='json',exclude_none=True) for a in edit.activities])
         result=ModelResult(summary=edit.summary,changes=edit.changes,trip=Trip.model_validate(candidate))
         verify_proposal(data.trip,result.trip,data.day)
+        return result
+    output=await model_json(system,{'currentDay':data.trip.days[data.day].model_dump(mode='json',exclude_none=True),'requirements':data.trip.requirements.model_dump(mode='json',exclude_none=True) if data.trip.requirements else None,'mode':data.trip.mode,'request':data.prompt,'places':list({p['id']:p for p in PLACES+[POIS[a.placeId] for d in data.trip.days for a in d.activities]}.values())},validate=validate_edit)
+    try:
+        result=validate_edit(output)
     except ValueError:raise HTTPException(422,'模型建议未通过结构或锁定检查，原行程未修改')
     for i,day in enumerate(result.trip.days):
         if len(day.activities)>1:

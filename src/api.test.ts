@@ -23,3 +23,19 @@ it('写入结果不确定时不自动重发，避免重复注册或分享',async
  const {api}=await import('./api');await expect(api('/auth/register','POST',{})).rejects.toThrow('未能确认')
  expect(fetch).toHaveBeenCalledTimes(2)
 })
+
+it('模型服务 502 不应让整个后端离线；地点搜索仍可用',async()=>{
+ const fetch=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({status:'ok',model:true}),{headers:{'content-type':'application/json'}})).mockResolvedValueOnce(new Response(JSON.stringify({detail:'免费模型暂不可用'}),{status:502})).mockResolvedValueOnce(new Response(JSON.stringify({places:[]})))
+ vi.stubGlobal('fetch',fetch)
+ const {api,checkAPI,connection}=await import('./api')
+ await checkAPI(true)
+ await expect(api('/planner/suggest','POST',{})).rejects.toThrow('免费模型暂不可用')
+ expect(connection.status).toBe('online');expect(connection.model).toBe(true)
+ await expect(api('/places/search?q=灵隐寺')).resolves.toEqual({places:[]})
+})
+it('网络中断与业务校验拒绝使用不同状态',async()=>{
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({status:'ok',model:true}),{headers:{'content-type':'application/json'}})).mockRejectedValueOnce(new TypeError('fetch failed')))
+ const {api,checkAPI,connection}=await import('./api');await checkAPI(true)
+ await expect(api('/places/search?q=灵隐寺')).rejects.toThrow('网络连接失败')
+ expect(connection.status).toBe('offline')
+})

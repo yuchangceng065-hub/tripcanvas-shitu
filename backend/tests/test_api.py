@@ -129,7 +129,7 @@ def test_model_edits_only_selected_day_and_preserves_saved_trip(client,monkeypat
     t['days'].append({**copy.deepcopy(t['days'][0]),'date':'2026-11-08','activities':[]})
     client.put('/api/v1/trips/'+t['id'],json={'trip':t})
     for key in ('MODEL_API_KEY','MODEL_BASE_URL','MODEL_NAME'):monkeypatch.setenv(key,'test')
-    async def edit(system,data):return {'summary':'晚一点出发','changes':['出发推迟15分钟'],'start':585,'activities':data['currentDay']['activities']}
+    async def edit(system,data,**kwargs):return {'summary':'晚一点出发','changes':['出发推迟15分钟'],'start':585,'activities':data['currentDay']['activities']}
     async def roads(body):return {'source':'osrm','legs':[{'minutes':10,'distance':1} for _ in body.placeIds[1:]]}
     monkeypatch.setattr(module,'model_json',edit);monkeypatch.setattr(app.state.router,'route',roads)
     r=client.post('/api/v1/planner/suggest',json={'trip':t,'day':0,'prompt':'晚一点出发'})
@@ -137,7 +137,7 @@ def test_model_edits_only_selected_day_and_preserves_saved_trip(client,monkeypat
     candidate=r.json()['trip'];assert candidate['days'][0]['start']==585 and candidate['days'][1]==t['days'][1]
     assert candidate['title']==t['title'] and candidate['revision']==1
     assert client.get('/api/v1/trips/'+t['id']).json()['days'][0]['start']==570
-    async def remove_locked(system,data):return {'summary':'错误删除','changes':[],'start':585,'activities':[]}
+    async def remove_locked(system,data,**kwargs):return {'summary':'错误删除','changes':[],'start':585,'activities':[]}
     monkeypatch.setattr(module,'model_json',remove_locked)
     assert client.post('/api/v1/planner/suggest',json={'trip':t,'day':0,'prompt':'保留锁定'}).status_code==422
 
@@ -146,3 +146,35 @@ def test_late_fixed_activity_does_not_move_following_arrivals_backwards():
     t['days'][0]['activities'].append({'id':'c','placeId':'museum','duration':60,'lock':'none'})
     result=issues(Trip.model_validate(t),{0:{'legs':[{'minutes':10},{'minutes':10}]}})
     assert {i['id'] for i in result}=={'b','c'}
+
+def test_model_parser_accepts_only_complete_json_objects():
+    from backend.app import parse_model_json
+    assert parse_model_json('```json\n{"summary":"室内游览"}\n```')=={'summary':'室内游览'}
+    for content,reason in [('',None),('{"summary":', 'length'),('建议如下：{"summary":"a"}',None),('[]',None)]:
+        with pytest.raises(ValueError):parse_model_json(content,reason)
+
+def test_free_glm_disables_thinking_and_repairs_locked_edit_once(client,monkeypatch):
+    import backend.app as module
+    import httpx,json
+    register(client);t=trip();t['days'][0]['activities'].append({'id':'c','placeId':'museum','duration':60,'lock':'none'})
+    for key,value in {'MODEL_API_KEY':'fake-key','MODEL_BASE_URL':'https://aihubmix.com/v1','MODEL_NAME':'coding-glm-5.1-free'}.items():monkeypatch.setenv(key,value)
+    good={'summary':'减少一站','changes':['移除未锁定地点'],'start':570,'activities':t['days'][0]['activities'][:2]}
+    bad=copy.deepcopy(good);bad['activities'][1]['duration']+=15
+    outputs=[bad,good];requests=[]
+    class Provider:
+        def __init__(self,**kwargs):pass
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+        async def post(self,url,**kwargs):
+            requests.append(copy.deepcopy(kwargs['json']))
+            text='```json\n'+json.dumps(outputs.pop(0))+'\n```'
+            return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'content':text}}]},request=httpx.Request('POST',url))
+    async def roads(body):return {'source':'osrm','legs':[{'minutes':10,'distance':1} for _ in body.placeIds[1:]]}
+    monkeypatch.setattr(module.httpx,'AsyncClient',Provider);monkeypatch.setattr(app.state.router,'route',roads)
+    r=client.post('/api/v1/planner/suggest',json={'trip':t,'day':0,'prompt':'少去一站'})
+    assert r.status_code==200,r.text
+    assert len(requests)==2
+    assert requests[0]['thinking']=={'type':'disabled'}
+    assert r.json()['source']=='model'
+    assert r.json()['trip']['days'][0]['activities'][1]==t['days'][0]['activities'][1]
+    assert '固定安排不能修改' in requests[1]['messages'][-1]['content']

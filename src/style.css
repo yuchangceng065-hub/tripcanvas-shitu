@@ -20,3 +20,4 @@
 @media(max-width:680px){.brand>span{font-size:20px;letter-spacing:1px}.primary-nav{gap:12px}}
 .brand{flex-shrink:0}.brand>span{white-space:nowrap}
 @media(max-width:360px){.site-header{gap:8px}.primary-nav{gap:8px}}
+.plan-heading-actions{display:flex;align-items:center;gap:3px}.assistant-tools{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--line)}.assistant-tools button{display:flex;gap:4px;align-items:center;font-size:10px;color:var(--green);padding:5px 0}.assistant-tools>span{font-size:8px;color:#89957f}.submitted-message{background:#eaf0e5;border-radius:9px;padding:11px 12px;margin-top:14px;color:#4c6547;font-size:11px;line-height:1.7;overflow-wrap:anywhere}.submitted-message small{display:block;color:#829176;font-size:8px;margin-bottom:4px}

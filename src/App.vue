@@ -7,6 +7,8 @@ import TripBuilder from './components/TripBuilder.vue'
 import {coordinateProposal,coordinationViolations,earlierProposal} from './coordination'
 import {extractVisitQuery,normalizePlaceQuery,visitProposal} from './placeIntent'
 import {handleComposerKeydown} from './composerKeyboard'
+import {credentialsFromForm} from './authForm'
+import {ApiError} from './apiError'
 import { useTrips } from './store'
 import { places,placeById,createTrip,clone,uid,time,schedule,validate,suggest,lockedChanges,registerPlaces,capturePlaces,departureDelay,departureProposal,validDepartureProposal,proposalErrors,returnAnchor,type Trip,type Activity,type Proposal,type Place } from './domain'
 import {checkAPI,api,remoteSuggestion,setToken,connection,backendConfigured} from './api'
@@ -22,11 +24,11 @@ const selectedEntry=computed(()=>entries.value.find(e=>e.activity.id===selected.
 const allIssues=computed(()=>validate(trip.value,roadRoutes.value)),errors=computed(()=>allIssues.value.filter(x=>x.severity==='error'))
 const totalTravel=computed(()=>entries.value.reduce((s,e)=>s+e.travel,0)),distance=computed(()=>entries.value.reduce((s,e)=>s+e.distance,0)),budget=computed(()=>entries.value.reduce((s,e)=>s+e.place.cost,0))
 const daysLabel=computed(()=>`${shortDate(trip.value.days[0]!.date)} — ${shortDate(trip.value.days.at(-1)!.date)}`)
-const proposal=ref<Proposal|null>(null),prompt=ref(''),busy=ref(false),response=ref(''),backend=computed(()=>connection.status==='online'),hasModel=ref(false),user=ref<{username:string}|null>(null),loginMode=ref(false),username=ref(''),password=ref(''),authError=ref(''),accountBusy=ref(false)
+const proposal=ref<Proposal|null>(null),prompt=ref(''),busy=ref(false),response=ref(''),backend=computed(()=>connection.status==='online'),hasModel=computed(()=>connection.model),user=ref<{username:string}|null>(null),loginMode=ref(false),username=ref(''),password=ref(''),authError=ref(''),accountBusy=ref(false)
 const proposalRoutes=ref<RouteMap>({}),proposalRouteError=ref('')
 const busyText=ref('正在检查可调整的安排…')
 const visitSearch=ref<{query:string;places:Place[];tripId:string;revision:number;day:number}|null>(null),visitLookupQuery=ref('')
-const composerInput=ref<HTMLTextAreaElement|null>(null)
+const composerInput=ref<HTMLTextAreaElement|null>(null),submittedPrompt=ref('')
 const proposalIssues=computed(()=>proposal.value?proposalErrors(trip.value,proposal.value.trip,proposalRoutes.value,proposal.value.coordination?.day):[])
 const departureRows=computed(()=>{const p=proposal.value;if(!p?.departure&&!p?.coordination&&!p?.visit)return [];const day=p.departure?.day??p.coordination?.day??p.visit!.day;const old=schedule(trip.value,day,proposalRoutes.value[routeKey(trip.value,day)]),next=schedule(p.trip,day,proposalRoutes.value[routeKey(p.trip,day)]);return [...next.map(e=>({id:e.activity.id,name:e.place.name,before:old.find(o=>o.activity.id===e.activity.id),after:e})),...old.filter(e=>!next.some(n=>n.activity.id===e.activity.id)).map(e=>({id:e.activity.id,name:e.place.name,before:e,after:undefined}))]})
 const visitEntry=computed(()=>{const p=proposal.value;if(!p?.visit)return;return schedule(p.trip,p.visit.day,proposalRoutes.value[routeKey(p.trip,p.visit.day)]).find(e=>e.place.id===p.visit!.placeId)})
@@ -43,7 +45,7 @@ watch([busy,response],async()=>{
 function onPromptKeydown(event:KeyboardEvent){
  handleComposerKeydown(event,text=>{prompt.value=text;void generate(text)})
 }
-function syncComposerValue(event:CompositionEvent){prompt.value=(event.target as HTMLTextAreaElement).value}
+function syncComposerValue(event:Event){prompt.value=(event.target as HTMLTextAreaElement).value}
 function submitComposer(){const text=composerInput.value?.value??prompt.value;prompt.value=text;void generate(text)}
 function acceptDraft(t:Trip){registerPlaces(t.placeSnapshots);store.add(t);syncTrip(t);openTrip(t.id);modal.value='';builderKey.value++;notify('旅行草案已确认保存')}
 const deletingTrip=ref<string|null>(null)
@@ -58,12 +60,12 @@ function closeShare(){shareTrip.value=null;window.location.hash=''}
 function shortDate(d:string){return `${Number(d.slice(5,7))}月${Number(d.slice(8))}日`}
 function weekday(d:string){return ['周日','周一','周二','周三','周四','周五','周六'][new Date(d+'T12:00:00').getDay()]}
 function imageFor(kind:string){return `/assets/${({food:'coffee',city:'museum',art:'museum'} as Record<string,string>)[kind]||kind}.jpg`}
-function onKeyboard(event:KeyboardEvent){if(!modal.value)return;if(event.key==='Escape'){modal.value='';return}if(event.key==='Tab'){const el=document.querySelector('.modal');const controls=Array.from(el?.querySelectorAll<HTMLElement>('button:not(:disabled),input,textarea,select,a[href]')||[]).filter(e=>e.offsetParent!==null);const first=controls[0],last=controls.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus()}}}
-watch(modal,async value=>{if(value){await nextTick();document.querySelector<HTMLElement>('.modal input,.modal textarea,.modal button')?.focus()}})
+function onKeyboard(event:KeyboardEvent){if(!modal.value)return;if(event.key==='Escape'){modal.value='';return}if(event.key==='Tab'){const el=Array.from(document.querySelectorAll<HTMLElement>('.modal')).find(el=>el.offsetParent!==null);const controls=Array.from(el?.querySelectorAll<HTMLElement>('button:not(:disabled),input,textarea,select,a[href]')||[]).filter(e=>e.offsetParent!==null);const first=controls[0],last=controls.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus()}}}
+watch(modal,async value=>{if(value){await nextTick();Array.from(document.querySelectorAll<HTMLElement>('.modal input,.modal textarea,.modal button')).find(el=>el.offsetParent!==null)?.focus()}})
 onMounted(()=>document.addEventListener('keydown',onKeyboard));onUnmounted(()=>document.removeEventListener('keydown',onKeyboard))
 function openModal(name:string){modal.value=name;search.value='';authError.value=''}
-function changeDay(i:number){dayIndex.value=i;selected.value=entries.value[0]?.activity.id||'';proposal.value=null;response.value=''}
-function openTrip(id:string){store.activeId=id;dayIndex.value=0;page.value='canvas';selected.value=entries.value[0]?.activity.id||'';proposal.value=null}
+function changeDay(i:number){submittedPrompt.value='';dayIndex.value=i;selected.value=entries.value[0]?.activity.id||'';proposal.value=null;response.value=''}
+function openTrip(id:string){response.value='';submittedPrompt.value='';visitSearch.value=null;store.activeId=id;dayIndex.value=0;page.value='canvas';selected.value=entries.value[0]?.activity.id||'';proposal.value=null}
 watch(()=>[trip.value.id,trip.value.revision,dayIndex.value],()=>{visitSearch.value=null})
 function commit(next:Trip,label:string,expected=trip.value.revision){try{if(next.requirements){next.requirements.mode=next.mode;next.requirements.people=next.people}capturePlaces(next);store.commit(next,label,expected);savedAt.value='刚刚保存';proposal.value=null;syncTrip(next);return true}catch(e){notify((e as Error).message);return false}}
 async function syncTrip(t:Trip){if(backend.value&&user.value){try{await api('/trips/'+t.id,'PUT',{trip:t});savedAt.value='已同步到云端'}catch{savedAt.value='已保存本地 · 同步失败'}}}
@@ -73,7 +75,13 @@ function drop(target:string){if(!dragging.value||target===dragging.value)return;
 function removeActivity(id:string){const n=clone(trip.value);const a=n.days[dayIndex.value]!.activities.find(a=>a.id===id)!;if(a.lock!=='none'){notify('该安排已锁定，请先解除锁定');return}n.days[dayIndex.value]!.activities=n.days[dayIndex.value]!.activities.filter(a=>a.id!==id);commit(n,'移除活动');modal.value=''}
 function edit(id:string){const a=trip.value.days[dayIndex.value]!.activities.find(a=>a.id===id)!;editActivity.value=clone(a);editDuration.value=a.duration;editDate.value=dayIndex.value;openModal('edit')}
 function saveEdit(){if(!editActivity.value)return;const a=editActivity.value;if(a.lock==='fixed'&&(editDuration.value!==a.duration||editDate.value!==dayIndex.value)){notify('固定安排不能更改时间，请先解除锁定');return}const n=clone(trip.value);const index=n.days[dayIndex.value]!.activities.findIndex(x=>x.id===a.id);n.days[dayIndex.value]!.activities.splice(index,1);a.duration=Number(editDuration.value);if(editDate.value===dayIndex.value)n.days[dayIndex.value]!.activities.splice(index,0,a);else n.days[editDate.value]!.activities.push(a);commit(n,'编辑活动安排');modal.value=''}
-function addPlace(id:string){const n=clone(trip.value);const a={id:uid(),placeId:id,duration:placeById(id).duration,lock:'none' as const};n.days[dayIndex.value]!.activities.push(a);commit(n,'添加 '+placeById(id).name);selected.value=a.id;modal.value='';notify('已添加到当天行程')}
+async function addPlace(id:string){
+ if(busy.value)return
+ const place=placeById(id);if(!place)return
+ visitSearch.value={query:place.name,places:[place],tripId:trip.value.id,revision:trip.value.revision,day:dayIndex.value}
+ modal.value='';page.value='canvas';tabMobile.value='ai'
+ await chooseVisit(id)
+}
 function assertCurrent(before:Trip,day:number){if(trip.value.id!==before.id||trip.value.revision!==before.revision||dayIndex.value!==day)throw new Error('行程或日期已变化，请重新搜索并规划')}
 async function lookupVisitPlaces(query:string,before:Trip,day:number){
  const q=normalizePlaceQuery(query);if(q.length<2||q.length>80)throw new Error('请输入 2—80 个字的地点或校区名称')
@@ -96,7 +104,7 @@ async function chooseVisit(id:string){
 }
 async function generate(text=prompt.value){
  if(busy.value||!text.trim())return
- busy.value=true;busyText.value='正在生成调整方案…';prompt.value=text;proposal.value=null;visitSearch.value=null;response.value='';proposalRouteError.value='';proposalRoutes.value={...roadRoutes.value}
+ busy.value=true;busyText.value='正在处理你的需求…';prompt.value=text;submittedPrompt.value=text;proposal.value=null;visitSearch.value=null;response.value='';proposalRouteError.value='';proposalRoutes.value={...roadRoutes.value}
  const before=clone(trip.value),day=dayIndex.value
  try{
   const query=extractVisitQuery(text)
@@ -104,15 +112,19 @@ async function generate(text=prompt.value){
   let next:Proposal
   const delay=departureDelay(text)
   if(delay!==null)next=departureProposal(before,day,delay)
-  else if(backend.value&&hasModel.value&&user.value)next=await remoteSuggestion(before,day,text)
-  else next=suggest(before,day,text)
+  else if(user.value){
+   const health=await checkAPI()
+   if(!health)throw new Error('暂时无法连接云端，请重新连接后重试。地点搜索和需求会保留。')
+   if(!health.model)throw new Error('AI 模型尚未配置；你仍可搜索地点、加入行程和整体顺延。')
+   next=await remoteSuggestion(before,day,text)
+  }else next=suggest(before,day,text)
   for(let i=0;i<next.trip.days.length;i++){if(JSON.stringify(next.trip.days[i])===JSON.stringify(before.days[i]))continue;if(next.trip.days[i]!.activities.length>1){try{proposalRoutes.value[routeKey(next.trip,i)]=await loadRoute(next.trip,i)}catch(e){proposalRouteError.value='道路用时未核验：'+(e as Error).message}}}
   if(trip.value.id!==before.id||trip.value.revision!==before.revision||dayIndex.value!==day)throw new Error('生成期间行程发生变化，请重新调整')
   if(next.departure)next=departureProposal(before,day,next.departure.delay,proposalRoutes.value)
   if(!proposalRouteError.value)next=await coordinateProposal(before,next,day,proposalRoutes.value,loadRoute,text=>busyText.value=text)
   if(trip.value.id!==before.id||trip.value.revision!==before.revision||dayIndex.value!==day)throw new Error('协调期间行程发生变化，请重新调整')
   proposal.value=next;response.value=next.summary
- }catch(e){response.value=(e as Error).message}finally{busy.value=false}
+ }catch(e){if(e instanceof ApiError&&e.status===401)user.value=null;response.value=(e as Error).message}finally{busy.value=false}
 }
 async function changeDepartureOption(event:Event,key:'shiftFixed'|'extendEnd'){
  const p=proposal.value;if(!p?.departure||busy.value)return
@@ -145,12 +157,31 @@ function exportCard(){const t=trip.value;const body=t.days.map((d,i)=>`<section>
 async function copySummary(){const text=trip.value.title+'\n'+trip.value.days.map((d,i)=>`${d.date}\n`+schedule(trip.value,i,roadRoutes.value[routeKey(trip.value,i)]).map(e=>`${time(e.start)} ${e.place.name}`).join('\n')).join('\n\n')+'\n\n来自拾途杭州 · 出发前请确认实际信息';try{await navigator.clipboard.writeText(text);notify('行程摘要已复制')}catch{notify('剪贴板不可用，请使用导出旅行卡片')}}
 async function createShare(){if(!backend.value||!user.value){notify('可撤销链接需要连接后端并登录；当前可导出旅行卡片');return}shareBusy.value=true;try{await api('/trips/'+trip.value.id,'PUT',{trip:trip.value});const r=await api('/trips/'+trip.value.id+'/shares','POST',{});shareUrl.value=location.origin+'/#share='+r.token;shareId.value=r.id}catch(e){notify((e as Error).message)}finally{shareBusy.value=false}}
 async function revokeShare(){try{await api('/shares/'+shareId.value,'DELETE');shareUrl.value='';shareId.value='';notify('链接已撤销')}catch(e){notify((e as Error).message)}}
-async function auth(){if(accountBusy.value)return;accountBusy.value=true;authError.value='';try{if(!backend.value&&!await checkAPI(true))throw new Error(backendConfigured?'云端服务尚未唤醒，请稍后重新连接。':'云端同步尚未配置，当前行程保存在此设备。');const session=await api('/auth/'+(loginMode.value?'register':'login'),'POST',{username:username.value,password:password.value});setToken(session.access_token);user.value={username:session.username};password.value='';const remote=await api('/trips');for(const t of remote){registerPlaces(t.placeSnapshots);const index=store.trips.findIndex(x=>x.id===t.id);if(index>=0)store.trips[index]=t;else store.trips.push(t)}modal.value=resumeBuilder.value?'new':'';resumeBuilder.value=false;notify('登录成功，可以同步与创建分享链接');await syncTrip(trip.value)}catch(e){authError.value=(e as Error).message}finally{accountBusy.value=false}}
+async function auth(event:Event){
+ if(accountBusy.value)return
+ accountBusy.value=true;authError.value=''
+ try{
+  const credentials=credentialsFromForm(new FormData(event.currentTarget as HTMLFormElement))
+  const info=await checkAPI(!backend.value)
+  if(!info)throw new Error(backendConfigured?'云端服务尚未唤醒，请稍后重新连接。':'云端同步尚未配置，当前行程保存在此设备。')
+  const session=await api('/auth/'+(loginMode.value?'register':'login'),'POST',credentials)
+  setToken(session.access_token);user.value={username:session.username};username.value=session.username;password.value=''
+  // A failed trip sync must not misreport a successful sign-in as a login error.
+  let synced=true
+  try{
+   const remote=await api('/trips')
+   for(const t of remote){registerPlaces(t.placeSnapshots);const index=store.trips.findIndex(x=>x.id===t.id);if(index>=0)store.trips[index]=t;else store.trips.push(t)}
+  }catch{synced=false}
+  modal.value=resumeBuilder.value?'new':'';resumeBuilder.value=false
+  notify(synced?'登录成功，可以使用 AI 调整与云端同步':'已登录；云端行程暂未加载，可稍后重新连接')
+  await syncTrip(trip.value)
+ }catch(e){authError.value=(e as Error).message}finally{accountBusy.value=false}
+}
 async function logout(){try{await api('/auth/logout','POST')}catch{}setToken('');user.value=null;modal.value='';notify('已退出账号，本地行程仍保留')}
-async function reconnect(){const info=await checkAPI(true);hasModel.value=!!info?.model;if(info){try{user.value=await api('/auth/me')}catch{user.value=null}notify('云端服务已连接')}}
+async function reconnect(){const info=await checkAPI(true);if(info){try{user.value=await api('/auth/me')}catch{user.value=null}notify('云端服务已连接')}}
 watch(()=>trip.value.id,()=>{dayIndex.value=0;proposal.value=null})
 watch(()=>entries.value.map(x=>x.activity.id).join(','),()=>{if(!entries.value.some(e=>e.activity.id===selected.value))selected.value=entries.value[0]?.activity.id||''})
-onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=await checkAPI();hasModel.value=!!info?.model;try{if(backend.value)user.value=await api('/auth/me')}catch{}if(location.hash.startsWith('#share=')){try{const shared=await api('/public/shares/'+encodeURIComponent(location.hash.slice(7)));registerPlaces(shared.placeSnapshots);shareTrip.value=shared}catch{notify('分享链接已失效，或无法连接后端服务')}}})
+onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=await checkAPI();try{if(backend.value)user.value=await api('/auth/me')}catch{}if(location.hash.startsWith('#share=')){try{const shared=await api('/public/shares/'+encodeURIComponent(location.hash.slice(7)));registerPlaces(shared.placeSnapshots);shareTrip.value=shared}catch{notify('分享链接已失效，或无法连接后端服务')}}})
 </script>
 <template>
  <div class="app-shell">
@@ -167,7 +198,7 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=
    <div class="mobile-tabs"><button :class="{active:tabMobile==='plan'}" @click="tabMobile='plan'">每日行程</button><button :class="{active:tabMobile==='map'}" @click="tabMobile='map'">路线地图</button><button :class="{active:tabMobile==='ai'}" @click="tabMobile='ai'">智能调整</button></div>
    <section class="workspace">
     <aside class="itinerary-panel" :class="{'mobile-show':tabMobile==='plan'}">
-     <div class="panel-heading"><h2>每日行程 <span>{{trip.days.length}} DAYS</span></h2><button class="icon-button" @click="openModal('trip-settings')" aria-label="行程设置"><Settings2 :size="17"/></button></div>
+     <div class="panel-heading"><h2>每日行程 <span>{{trip.days.length}} DAYS</span></h2><div class="plan-heading-actions"><button class="icon-button" @click="openModal('search')" :disabled="busy" aria-label="搜索地点并加入当天路线" title="添加想去的地点"><Plus :size="18"/></button><button class="icon-button" @click="openModal('trip-settings')" aria-label="行程设置"><Settings2 :size="17"/></button></div></div>
      <div class="day-tabs"><button v-for="(d,i) in trip.days" :key="d.date" :class="{active:dayIndex===i}" @click="changeDay(i)"><strong>Day {{i+1}}</strong><span>{{shortDate(d.date)}} · {{weekday(d.date)}}</span></button></div>
      <div class="day-overview"><div><span class="tiny-dot"/>{{dayIndex===0?'沿着西湖，慢慢走':dayIndex===1?'南岸的人文与树影':'留给喜欢的风景'}}</div><button @click="setMode" :title="'切换交通方式'"><Footprints v-if="trip.mode==='walk'" :size="14"/><Car v-else :size="14"/>{{trip.mode==='walk'?'步行':'驾车'}}<ChevronDown :size="12"/></button></div>
      <div class="timeline-scroll">
@@ -193,12 +224,14 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=
      <div class="map-route-note">{{routeReady?'道路时间不含实时交通、停车与进出景区。':'路线未核验，当前时间与里程仅为粗略估算。'}} <span v-if="entries.some(e=>e.place.costKnown===false)">部分地点费用未知，预算仅汇总已知金额。</span><span v-if="routeState.route?.waypoints.some(w=>w.distance>100)">虚线连接地点与附近道路。</span></div>
     </section>
     <aside class="assistant-panel" :class="{'mobile-show':tabMobile==='ai'}">
-     <div class="assistant-header"><span class="spark-icon"><Sparkles :size="19"/></span><div><h2>你的旅行搭子</h2><p>一起，把旅程调整到刚刚好。</p></div><span class="ai-badge">{{hasModel&&user?'AI':'体验版'}}</span></div>
+     <div class="assistant-header"><span class="spark-icon"><Sparkles :size="19"/></span><div><h2>你的旅行搭子</h2><p>一起，把旅程调整到刚刚好。</p></div><span class="ai-badge">{{user?(hasModel?'AI 已连接':'路线助手'):'未登录'}}</span></div>
+     <div class="assistant-tools"><button type="button" :disabled="busy" @click="openModal('search')"><Plus :size="14"/>添加想去的地点</button><button v-if="!user" type="button" @click="openModal('account')">登录使用 AI<ArrowRight :size="12"/></button><span v-else>已登录 · {{hasModel?'AI 调整可用':'地点规划可用'}}</span></div>
      <div ref="assistantScroll" class="assistant-scroll">
       <div class="assistant-intro"><span class="mini-eyebrow">HELLO, TRAVELER</span><h3>好旅行，<br>也需要一点留白。</h3><p>想晚点出发，还是多坐一会儿？<br>告诉我，我们一起调整。</p><div class="intro-art"><div class="sun-disc"/><div class="hill hill-back"/><div class="hill hill-front"/><div class="art-path"/><span class="tiny-tree">♧</span><div class="art-note">TAKE IT SLOW</div></div></div>
       <div class="suggestion-title">试试这样调整 <Sparkles :size="13"/></div>
       <div class="quick-prompts"><button @click="generate('今天轻松一点，减少一个地点')" :disabled="busy"><Leaf :size="16"/><span>今天想轻松一点</span><ArrowUpRight :size="14"/></button><button @click="generate('下雨了，改成室内活动')" :disabled="busy"><CloudRain :size="16"/><span>换成室内的好去处</span><ArrowUpRight :size="14"/></button><button @click="generate('晚出发一小时')" :disabled="busy"><Coffee :size="16"/><span>多睡一会，晚点出发</span><ArrowUpRight :size="14"/></button></div>
       <div class="protected-note"><LockKeyhole :size="14"/><p>你锁定的安排，会好好保留。<span>调整前可以预览，确认后再应用。</span></p></div>
+      <div v-if="submittedPrompt" class="submitted-message"><small>你的需求 · Day {{dayIndex+1}}</small><p>{{submittedPrompt}}</p></div>
       <div v-if="busy" class="assistant-message" role="status"><LoaderCircle :size="17" class="spin"/>{{busyText}}</div>
       <div v-if="response" class="assistant-message response" role="status"><Sparkles :size="16"/><p>{{response}}</p></div>
       <section v-if="visitSearch" class="visit-search-card" aria-label="确认想去的具体地点"><h3>选择具体地点，再规划。</h3><p>加入 Day {{visitSearch.day+1}}，核验路线并协调时间。选中的地点会设为必须保留。</p><form class="visit-refine" @submit.prevent="refineVisitSearch"><input v-model="visitLookupQuery" :readonly="busy" aria-label="地点或校区名称" maxlength="80"/><button type="submit" class="button quiet small" :disabled="busy||visitLookupQuery.trim().length<2">重新搜索</button></form><article v-for="p in visitSearch.places" :key="p.id"><strong>{{p.name}}</strong><p>{{p.address||p.tag}}</p><a v-if="p.coordinateSource" :href="p.coordinateSource" target="_blank" rel="noopener noreferrer">核对地图位置<ExternalLink :size="11"/></a><button class="button primary small full" :disabled="busy" :aria-label="`规划到${p.name}`" @click="chooseVisit(p.id)">选此地点并重新规划<ArrowRight :size="13"/></button></article><p v-if="!visitSearch.places.length">没有匹配结果，请输入完整地点或校区名称。</p><small>© OpenStreetMap contributors · Photon 真实地点搜索</small><button class="text-button full" @click="visitSearch=null;response=''" :disabled="busy">暂不添加</button></section>
@@ -210,7 +243,7 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=
        <details v-if="departureRows.length" :open="!!proposal.departure" class="time-comparison"><summary>逐站时间对比</summary><div class="departure-timeline" aria-label="逐站时间对比"><div class="departure-row departure-row-head"><span>地点</span><span>原安排</span><span>新安排</span></div><div v-for="row in departureRows" :key="row.id" class="departure-row"><strong>{{row.name}}</strong><span v-if="row.before">{{time(row.before.start)}}<small>— {{time(row.before.end)}}</small></span><span v-else>新增</span><span v-if="row.after" :class="{late:row.after.conflict}">{{time(row.after.start)}}<small>— {{time(row.after.end)}}</small></span><span v-else>本次移除</span></div></div></details>
        <div v-for="(issue,i) in proposalIssues" :key="`${issue.id}-${i}`" class="proposal-error"><AlertTriangle :size="14"/>{{issue.message}}</div><button v-if="proposal.coordination?.earlierStart!==undefined&&!proposal.coordination.resolved" class="button quiet full earlier-option" :disabled="busy" @click="useEarlierStart">改为 {{time(proposal.coordination.earlierStart)}} 出发并预览</button><p v-if="proposalRouteError" class="proposal-error">{{proposalRouteError}}，请重新生成。</p><button class="button primary" @click="applyProposal" :disabled="busy||proposalIssues.length>0||!!proposalRouteError"><Check :size="16"/>{{proposal.departure?'确认顺延并应用':'应用这个安排'}}</button><button class="text-button" @click="proposal=null;response=''">保留原计划</button></div>
      </div>
-     <form class="composer" @submit.prevent="submitComposer"><textarea ref="composerInput" v-model="prompt" rows="2" placeholder="杭州想去哪？例如：我想参观浙工大" aria-label="行程调整需求" aria-describedby="composer-help" :readonly="busy" :aria-busy="busy" @keydown="onPromptKeydown" @compositionend="syncComposerValue"/><p id="composer-help" class="composer-help">选词后 Enter 发送 · Shift+Enter 换行</p><div><span><Sparkles :size="12"/>仅调整 Day {{dayIndex+1}}</span><button type="submit" :disabled="busy||!prompt.trim()" aria-label="发送调整需求"><LoaderCircle v-if="busy" class="spin" :size="16"/><ArrowUp v-else :size="17"/></button></div></form>
+     <form class="composer" @submit.prevent="submitComposer"><textarea ref="composerInput" v-model="prompt" rows="2" placeholder="杭州想去哪？例如：我想参观浙工大" aria-label="行程调整需求" aria-describedby="composer-help" maxlength="1000" :readonly="busy" :aria-busy="busy" @input="syncComposerValue" @keydown="onPromptKeydown" @compositionend="syncComposerValue"/><p id="composer-help" class="composer-help">选词后 Enter 发送 · Shift+Enter 换行</p><div><span><Sparkles :size="12"/>仅调整 Day {{dayIndex+1}}</span><button type="submit" :disabled="busy||!prompt.trim()" aria-label="发送调整需求"><LoaderCircle v-if="busy" class="spin" :size="16"/><ArrowUp v-else :size="17"/></button></div></form>
      <p class="assistant-disclaimer">{{proposal?.source==='schedule'?'本次为地点与道路排程计算，确认后才应用':hasModel&&user?'建议仍需结合实际情况确认':'可搜索地点并规划路线；AI 自由调整需登录'}}</p>
     </aside>
    </section>
@@ -222,13 +255,13 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=
   <div v-if="modal&&modal!=='new'" class="modal-backdrop" @click.self="modal=''" @keydown.esc="modal=''">
    <section class="modal" :class="{'wide-modal':modal==='search'}" role="dialog" aria-modal="true" :aria-label="({delete:'删除旅行',new:'开启新旅行',search:'添加地点',history:'历史版本',share:'分享行程',edit:'编辑活动',checks:'行程检查',account:'账号设置',help:'关于拾途','trip-settings':'旅行设置'} as Record<string,string>)[modal]">
     <button class="modal-close icon-button" @click="modal=''" aria-label="关闭弹窗"><X :size="20"/></button>
-    <template v-if="modal==='delete'"><span class="eyebrow">YOUR TRAVEL COLLECTION</span><h2>删除这份旅行？</h2><p class="modal-description">该旅行的历史版本和关联分享链接也会删除。需要保留时，请先导出完整计划。</p><div class="modal-actions"><button class="button quiet" @click="modal=''">保留旅行</button><button class="button danger" @click="deleteTrip">确认删除</button></div></template><template v-else-if="modal==='search'"><span class="eyebrow">MAKE ROOM FOR A LITTLE DISCOVERY</span><h2>加一个想去的地方</h2><PlacePicker :favorites="store.favorites" @favorite="store.toggleFavorite" :selected="trip.days[dayIndex]!.activities.map(a=>a.placeId)" @choose="addPlace($event.id)"/></template>
+    <template v-if="modal==='delete'"><span class="eyebrow">YOUR TRAVEL COLLECTION</span><h2>删除这份旅行？</h2><p class="modal-description">该旅行的历史版本和关联分享链接也会删除。需要保留时，请先导出完整计划。</p><div class="modal-actions"><button class="button quiet" @click="modal=''">保留旅行</button><button class="button danger" @click="deleteTrip">确认删除</button></div></template><template v-else-if="modal==='search'"><span class="eyebrow">MAKE ROOM FOR A LITTLE DISCOVERY</span><h2>加一个想去的地方</h2><p class="modal-description">加入 Day {{dayIndex+1}}。选择具体地点后，会重算道路与时间；确认预览后才保存。</p><PlacePicker :favorites="store.favorites" @favorite="store.toggleFavorite" :selected="trip.days[dayIndex]!.activities.map(a=>a.placeId)" @choose="addPlace($event.id)"/></template>
     <template v-else-if="modal==='edit'&&editActivity"><span class="eyebrow">A MOMENT IN YOUR JOURNEY</span><h2>{{placeById(editActivity.placeId).name}}</h2><img class="detail-image" :src="imageFor(placeById(editActivity.placeId).image)" alt="旅行氛围配图"/><p class="modal-description">{{placeById(editActivity.placeId).description}}</p><a class="route-detail-link" :href="`https://www.openstreetmap.org/?mlat=${placeById(editActivity.placeId).lat}&mlon=${placeById(editActivity.placeId).lng}#map=17/${placeById(editActivity.placeId).lat}/${placeById(editActivity.placeId).lng}`" target="_blank" rel="noopener noreferrer">在 OpenStreetMap 查看位置<ExternalLink :size="13"/></a><div class="form-row"><label>停留时长<select v-model="editDuration"><option v-for="m in [30,45,60,75,80,90,100,110,120,150,180]" :value="m" :key="m">{{m}} 分钟</option></select></label><label>安排日期<select v-model="editDate"><option v-for="(d,i) in trip.days" :key="d.date" :value="i">Day {{i+1}} · {{shortDate(d.date)}}</option></select></label></div><p v-if="editActivity.lock!=='none'" class="form-hint"><LockKeyhole :size="13"/>{{editActivity.lock==='fixed'?'已固定地点和时间，请先在卡片上解锁再更改。':'该地点已设为必须保留。'}}</p><div class="modal-actions"><button class="button danger" @click="removeActivity(editActivity.id)"><Trash2 :size="16"/>移除地点</button><button class="button primary" @click="saveEdit">保存安排<Check :size="16"/></button></div></template>
     <template v-else-if="modal==='history'"><span class="eyebrow">EVERY CHANGE, KEPT SAFE</span><h2>旅行的不同版本</h2><p class="modal-description">放心尝试，喜欢的安排随时可以找回来。</p><div class="version-list"><article v-for="(v,i) in store.versions[trip.id]" :key="v.id"><span class="version-dot"/><div><h3>{{v.label}}<span v-if="i===0">当前版本</span></h3><p>{{new Date(v.date).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}} · {{v.trip.days.reduce((s,d)=>s+d.activities.length,0)}} 个地点</p></div><button v-if="i" class="button quiet small" @click="restore(v.id)"><RotateCcw :size="13"/>恢复</button></article></div></template>
     <template v-else-if="modal==='share'"><span class="eyebrow">GOOD JOURNEYS ARE BETTER SHARED</span><h2>把期待，分享出去。</h2><p class="modal-description">分享当前版本，或者带一份旅行卡片出发。</p><div class="share-preview"><Compass :size="30"/><div><strong>{{trip.title}}</strong><p>{{daysLabel}} · {{trip.days.length}} 天 · {{trip.people}} 人</p></div></div><button class="share-option" @click="exportCard"><Download :size="20"/><span><strong>导出旅行卡片</strong><small>可独立打开的 HTML 文件，副本无法远程撤销</small></span><ChevronRight :size="18"/></button><button class="share-option" @click="copySummary"><Copy :size="20"/><span><strong>复制行程摘要</strong><small>发送给朋友，一起期待下一站</small></span><ChevronRight :size="18"/></button><button class="share-option" @click="exportTrip"><Download :size="20"/><span><strong>导出完整计划</strong><small>JSON 格式，保留活动和锁定条件</small></span><ChevronRight :size="18"/></button><div class="link-share"><button class="button primary full" @click="createShare" :disabled="shareBusy"><Share2 :size="16"/>{{shareBusy?'正在创建…':'创建可撤销分享链接'}}</button><p v-if="!backend||!user" class="form-hint">链接分享需登录配套后端，当前可使用上方导出功能。</p><div v-if="shareUrl" class="share-link"><input :value="shareUrl" readonly aria-label="分享链接"/><button class="text-button" @click="revokeShare">撤销链接</button></div></div></template>
     <template v-else-if="modal==='checks'"><span class="eyebrow">A LITTLE CHECK BEFORE YOU GO</span><h2>让行程更从容</h2><div v-if="!errors.length" class="check-success"><CheckCircle2 :size="23"/><div><strong>目前没有时间冲突</strong><p>{{checkedDays===trip.days.length?'全部日期已按道路用时检查，实际路况仍需确认。':'部分日期仍按估算检查，请切换日期加载道路路线。'}}</p></div></div><div v-for="issue in allIssues" :key="issue.id" class="issue-item"><AlertTriangle :size="18"/><span>{{issue.message}}</span></div><div class="info-box"><Info :size="18"/><p>OpenStreetMap 提供底图，FOSSGIS / OSRM 提供步行与驾车路线。道路用时不含实时交通、停车、排队；地点可能吸附到附近道路。营业时间、票价与预约仍需确认。</p></div></template>
     <template v-else-if="modal==='trip-settings'"><span class="eyebrow">MAKE IT YOUR OWN</span><h2>旅行的小设定</h2><label>旅行名称<input :value="trip.title" @change="commit({...clone(trip),title:($event.target as HTMLInputElement).value.slice(0,50)||trip.title},'修改旅行名称')" maxlength="50"/></label><div class="form-row"><label>Day {{dayIndex+1}} 出发时间<input type="time" :value="time(trip.days[dayIndex]!.start)" @change="saveSettings($event,'start')"/></label><label>当天结束时间<input type="time" :value="time(trip.days[dayIndex]!.end)" @change="saveSettings($event,'end')"/></label></div><label>交通方式<button class="button quiet" @click="setMode"><Footprints v-if="trip.mode==='walk'" :size="16"/><Car v-else :size="16"/>{{trip.mode==='walk'?'步行 · 点击切换驾车':'驾车 · 点击切换步行'}}</button></label><p class="form-hint">变更立即保存。请留意调整后出现的时间冲突。</p><button class="button primary full" @click="modal=''">完成<Check :size="16"/></button></template>
-    <template v-else-if="modal==='account'"><span class="eyebrow">YOUR JOURNEYS, YOUR SPACE</span><h2>{{user?'你好，'+user.username:loginMode?'创建拾途杭州账号':'欢迎回来'}}</h2><template v-if="user"><p class="modal-description">行程会同步到你连接的后端，当前设备也保留本地副本。</p><button class="button quiet full" @click="logout">退出登录</button></template><form v-else @submit.prevent="auth"><p class="modal-description">{{backend?'登录后同步旅行、创建可撤销分享。':backendConfigured?'云端服务可能正在休眠，连接成功后即可登录。':'当前为无需账号的本地体验，行程保存在此浏览器。'}}</p><label>用户名<input v-model="username" autocomplete="username" minlength="3" maxlength="32" required/></label><label>密码<input v-model="password" type="password" :autocomplete="loginMode?'new-password':'current-password'" minlength="8" maxlength="128" required/></label><p v-if="authError" class="form-error">{{authError}}</p><button class="button primary full" :disabled="accountBusy" type="submit">{{accountBusy?'正在连接…':loginMode?'注册并登录':'登录'}}<ArrowRight :size="17"/></button><button type="button" class="text-button full" @click="loginMode=!loginMode">{{loginMode?'已有账号，去登录':'创建新账号'}}</button></form></template>
+    <template v-else-if="modal==='account'"><span class="eyebrow">YOUR JOURNEYS, YOUR SPACE</span><h2>{{user?'你好，'+user.username:loginMode?'创建拾途杭州账号':'欢迎回来'}}</h2><template v-if="user"><p class="modal-description">行程会同步到你连接的后端，当前设备也保留本地副本。</p><button class="button quiet full" @click="logout">退出登录</button></template><form v-else @submit.prevent="auth" novalidate><p class="modal-description">{{backend?'登录后同步旅行、创建可撤销分享。':backendConfigured?'云端服务可能正在休眠，连接成功后即可登录。':'当前为无需账号的本地体验，行程保存在此浏览器。'}}</p><label>用户名<input v-model="username" name="username" autocomplete="username" :readonly="accountBusy" minlength="3" maxlength="32" required/></label><label>密码<input v-model="password" name="password" :readonly="accountBusy" type="password" :autocomplete="loginMode?'new-password':'current-password'" minlength="8" maxlength="128" required/></label><p class="form-hint">用户名 3—32 个字符；密码至少 8 个字符。</p><p v-if="authError" class="form-error" role="alert">{{authError}}</p><button class="button primary full" :disabled="accountBusy" type="submit">{{accountBusy?'正在连接…':loginMode?'注册并登录':'登录'}}<ArrowRight :size="17"/></button><button type="button" class="text-button full" :disabled="accountBusy" @click="loginMode=!loginMode;authError=''">{{loginMode?'已有账号，去登录':'创建新账号'}}</button></form></template>
     <template v-else-if="modal==='help'"><span class="eyebrow">A THOUGHTFUL WAY TO WANDER</span><h2>你好，这里是拾途杭州。</h2><p class="modal-description">专注杭州 1—3 日短途游，让想去的地点落到地图与时间轴上。</p><div class="help-list"><p><Map :size="20"/><span><strong>在地图上安排旅程</strong>点击地点、拖动行程卡片，或使用上下箭头调整顺序。</span></p><p><LockKeyhole :size="20"/><span><strong>留住已经确定的安排</strong>锁定按钮依次切换：必须保留、固定时间、解除锁定。</span></p><p><Sparkles :size="20"/><span><strong>先预览，再决定</strong>可以输入想去的杭州地点、调整停留与出发时间；核对路线与变化后再确认。</span></p></div><div class="info-box"><Info :size="18"/><p>地图和道路路线已接入 OpenStreetMap 与 FOSSGIS / OSRM，路线最多缓存 24 小时，不含实时路况；地点坐标会发送给路线服务。图片为 Unsplash 氛围素材。计划仍保留本地副本；云端同步与真实模型取决于后端配置。</p></div><button class="button primary full" @click="modal=''">开始慢慢探索<ArrowRight :size="17"/></button></template>
    </section>
   </div>
