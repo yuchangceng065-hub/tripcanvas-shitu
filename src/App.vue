@@ -12,7 +12,7 @@ import {credentialsFromForm} from './authForm'
 import {ApiError} from './apiError'
 import { useTrips } from './store'
 import { places,placeById,createTrip,clone,uid,time,schedule,validate,suggest,lockedChanges,registerPlaces,capturePlaces,departureDelay,departureProposal,validDepartureProposal,proposalErrors,returnAnchor,type Trip,type Activity,type Proposal,type Place,type Mobility } from './domain'
-import {checkAPI,api,remoteSuggestion,setToken,connection,backendConfigured} from './api'
+import {checkAPI,api,remoteSuggestion,setToken,connection,backendConfigured,confirmTrip} from './api'
 import {useRoadRoutes,routeKey,loadRoute,type RouteMap} from './routes'
 const store=useTrips()
 const page=ref<'canvas'|'trips'|'favorites'>('canvas'),dayIndex=ref(0),selected=ref(''),modal=ref(''),toast=ref(''),search=ref(''),dragging=ref(''),tabMobile=ref('plan')
@@ -150,7 +150,7 @@ async function changeDepartureOption(event:Event,key:'shiftFixed'|'extendEnd'){
  try{const result=await coordinateProposal(before,next,day,proposalRoutes.value,loadRoute,text=>busyText.value=text);if(trip.value.id!==before.id||trip.value.revision!==before.revision||dayIndex.value!==day)throw new Error('行程已变化，请重新生成');proposal.value=result}catch(e){response.value=(e as Error).message}finally{busy.value=false}
 }
 function useEarlierStart(){const p=proposal.value;if(!p||p.baseRevision!==trip.value.revision){notify('行程已变化，请重新生成');return}try{const next=earlierProposal(p);const violations=coordinationViolations(trip.value,next,proposalRoutes.value);if(violations.length)throw new Error(violations.join('；'));proposal.value=next;response.value='已预览提前出发的备选方案，原行程尚未修改。'}catch(e){notify((e as Error).message)}}
-function applyProposal(){
+async function applyProposal(){
  if(!proposal.value||busy.value)return
  const p=proposal.value
  if(p.trip.id!==trip.value.id||p.baseRevision!==trip.value.revision){notify('行程已变化，请重新生成方案');return}
@@ -160,7 +160,17 @@ function applyProposal(){
  if(proposalRouteError.value){notify('请先重新生成，完成道路路线核验');return}
  if(proposalIssues.value.length){notify('方案中仍有时间冲突，请先调整条件');return}
  Object.assign(roadRoutes.value,proposalRoutes.value)
- if(commit(p.trip,'应用智能调整',p.baseRevision)){if(p.visit)selected.value=p.trip.days[p.visit.day]!.activities.find(a=>a.placeId===p.visit!.placeId)!.id;notify(p.visit?'已加入选中地点并更新道路路线，可在历史版本中恢复':p.transport?'交通与停车已更新，可在历史版本中恢复':'新的安排已应用，可以在历史版本中恢复')}
+ let applied:Trip=p.trip
+ if(backend.value&&user.value){
+  busy.value=true
+  try{
+   const result=await confirmTrip(p.trip,p.baseRevision)
+   registerPlaces(result.trip.placeSnapshots)
+   applied=result.trip
+  }catch(e){notify((e as Error).message);return}
+  finally{busy.value=false}
+ }
+ if(commit(applied,'应用智能调整',p.baseRevision)){if(p.visit)selected.value=applied.days[p.visit.day]!.activities.find(a=>a.placeId===p.visit!.placeId)!.id;notify(p.visit?'已加入选中地点并更新道路路线，可在历史版本中恢复':p.transport?'交通与停车已更新，可在历史版本中恢复':'新的安排已应用，可在历史版本中恢复')}
 }
 function restore(id:string){const v=store.versions[trip.value.id]?.find(x=>x.id===id);if(!v)return;commit(clone(v.trip),'恢复历史版本');modal.value='';notify('已恢复，并保留所有历史记录')}
 function setMode(){const t=clone(trip.value);t.mode=t.mode==='walk'?'drive':'walk';commit(t,'切换交通方式')}

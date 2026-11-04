@@ -3,6 +3,10 @@ export class ApiError extends Error {
 }
 export function apiErrorMessage(detail:unknown,status:number):string {
  if(typeof detail==='string'&&detail.trim())return detail
+ if(detail&&typeof detail==='object'&&Array.isArray((detail as {issues?:unknown}).issues)){
+  const messages=((detail as {issues:{message?:string}[]}).issues).map(issue=>issue?.message).filter((message):message is string=>!!message)
+  if(messages.length)return [...new Set(messages)].slice(0,3).join('；')
+ }
  if(Array.isArray(detail)){
   const messages=detail.map((issue:any)=>{
    const field=Array.isArray(issue?.loc)?issue.loc.at(-1):''

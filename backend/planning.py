@@ -61,3 +61,64 @@ def make_trip(body,order,pois):
             activities.append(a)
         days.append({'date':str(r.startDate+timedelta(days=i)),'start':r.start,'end':r.end,'activities':activities})
     return {'id':str(uuid.uuid4()),'title':body.title,'city':r.city,'people':r.people,'mode':r.mode,'days':days,'revision':1,'requirements':r.model_dump(mode='json')}
+
+def _shorten_options(day,before,minutes):
+    """Previewable repairs: shorten unlocked stops before the conflict."""
+    options=[]
+    for activity in day.activities[:before]:
+        if activity.lock=='none' and activity.duration-30>0:
+            options.append({'action':'shorten','activityId':activity.id,'minutes':min(minutes,activity.duration-30)})
+    return options
+
+def evaluate(trip,routes,pois):
+    """One authoritative hard-constraint pass. Unknown roads never count as feasible."""
+    issues=[]
+    for index,day in enumerate(trip.days):
+        route=(routes or {}).get(index)
+        legs=route.get('legs') if isinstance(route,dict) else None
+        if len(day.activities)>1 and not legs:
+            issues.append({'code':'route_missing','severity':'error','day':index,'activityId':None,
+                'message':f'第 {index+1} 天缺少真实道路路线，无法确认可行','options':[{'action':'retry_route','day':index}]})
+            continue
+        end=day.start
+        for position,activity in enumerate(day.activities):
+            minutes=legs[position-1].get('minutes',0) if legs and position else 0
+            earliest=end+minutes
+            start=activity.fixedStart if activity.lock=='fixed' and activity.fixedStart is not None else earliest
+            end=start+activity.duration
+            if start<earliest:
+                late=earliest-start
+                options=_shorten_options(day,position,late)
+                options.append({'action':'depart_earlier','day':index,'minutes':late})
+                issues.append({'code':'fixed_too_early','severity':'error','day':index,'activityId':activity.id,
+                    'message':f'第 {index+1} 天 {pois[activity.placeId]["name"]} 最早可在 {earliest//60:02d}:{earliest%60:02d} 到达，固定时间 {start//60:02d}:{start%60:02d} 早到 {late} 分钟',
+                    'options':options})
+            if end>day.end:
+                over=end-day.end
+                options=_shorten_options(day,position,over)
+                options.append({'action':'extend_day','day':index,'minutes':over})
+                if activity.lock=='none' and len(day.activities)>1:
+                    options.append({'action':'drop','activityId':activity.id})
+                issues.append({'code':'day_overflow','severity':'error','day':index,'activityId':activity.id,
+                    'message':f'第 {index+1} 天超出结束时间 {over} 分钟（{pois[activity.placeId]["name"]} 结束于 {end//60:02d}:{end%60:02d}）',
+                    'options':options})
+        requirements=getattr(trip,'requirements',None)
+        if index==len(trip.days)-1 and requirements and requirements.returnBy is not None and day.activities:
+            last=day.activities[-1]
+            last_start=_activity_start(day,legs,last)
+            if last_start>requirements.returnBy:
+                issues.append({'code':'return_deadline','severity':'error','day':index,'activityId':last.id,
+                    'message':f'第 {index+1} 天最早 {last_start//60:02d}:{last_start%60:02d} 才能到达 {pois[last.placeId]["name"]}，晚于要求的 {requirements.returnBy//60:02d}:{requirements.returnBy%60:02d}',
+                    'options':[{'action':'shorten','activityId':a.id,'minutes':last_start-requirements.returnBy} for a in day.activities if a.lock=='none']})
+    return issues
+
+def _activity_start(day,legs,activity):
+    end=day.start
+    for position,item in enumerate(day.activities):
+        minutes=legs[position-1].get('minutes',0) if legs and position else 0
+        earliest=end+minutes
+        start=item.fixedStart if item.lock=='fixed' and item.fixedStart is not None else earliest
+        end=start+item.duration
+        if item.id==activity.id:return start
+    return end
+

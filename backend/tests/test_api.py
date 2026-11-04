@@ -213,3 +213,116 @@ def test_map_config_never_exposes_private_keys_and_proxy_rejects_untrusted_reque
     assert 'private-web-secret' not in data.text and 'private-security-code' not in data.text
     assert client.get('/_AMapService/v4/map/styles?key=domain-bound-public-js',headers={'Origin':'https://untrusted.invalid'}).status_code==403
     assert client.get('/_AMapService/v5/direction/driving?key=domain-bound-public-js',headers={'Origin':'http://127.0.0.1:5173'}).status_code==404
+
+def test_anonymous_daily_budget_is_bounded(client):
+    from backend.app import reserve_anonymous,HTTPException
+    for _ in range(3):reserve_anonymous('unit-test',3)
+    with pytest.raises(HTTPException) as caught:reserve_anonymous('unit-test',3)
+    assert caught.value.status_code==429
+    assert '未登录' in caught.value.detail
+
+def test_same_host_origin_passes_behind_tls_proxy(client):
+    response=client.post('/api/v1/routes',json={'mode':'walk','placeIds':['invented','quyuan']},
+        headers={'Origin':'https://tripcanvas-api.onrender.com','Host':'tripcanvas-api.onrender.com'})
+    # Origin accepted, unknown place rejected by the route contract.
+    assert response.status_code==422
+    rejected=client.post('/api/v1/routes',json={'mode':'walk','placeIds':['invented','quyuan']},
+        headers={'Origin':'https://evil.example','Host':'tripcanvas-api.onrender.com'})
+    assert rejected.status_code==403
+
+def test_signed_in_route_calls_use_the_account_bucket(client):
+    register(client)
+    me=client.get('/api/v1/auth/me').json()
+    login=client.post('/api/v1/auth/login',json={'username':me['username'],'password':'correct-horse-824!'}).json()
+    response=client.post('/api/v1/routes',json={'mode':'walk','placeIds':['invented','quyuan']},
+        headers={'Authorization':'Bearer '+login['access_token']})
+    assert response.status_code==422
+
+def fast_roads(body):
+    return {'source':'osrm','legs':[{'minutes':10,'distance':.6} for _ in body.placeIds[1:]]}
+
+def test_confirm_is_authoritative_and_idempotent(client,monkeypatch):
+    register(client)
+    async def roads(body):return fast_roads(body)
+    monkeypatch.setattr(app.state.router,'route',roads)
+    t=trip()
+    first=client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0})
+    assert first.status_code==200,first.text
+    assert first.json()['revision']==1 and first.json()['idempotent'] is False
+    assert client.get('/api/v1/trips/'+t['id']).json()['revision']==1
+    replay=client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0})
+    assert replay.status_code==200 and replay.json()['idempotent'] is True
+    stale=copy.deepcopy(t);stale['revision']=2
+    assert client.post('/api/v1/planner/confirm',json={'trip':stale,'baseRevision':0}).status_code==409
+
+def test_confirm_rejects_infeasible_draft_with_repair_options(client,monkeypatch):
+    register(client)
+    async def slow(body):return {'source':'osrm','legs':[{'minutes':500,'distance':30} for _ in body.placeIds[1:]]}
+    monkeypatch.setattr(app.state.router,'route',slow)
+    t=trip()
+    result=client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0})
+    assert result.status_code==422
+    detail=result.json()['detail']
+    assert detail['code']=='infeasible'
+    codes={issue['code'] for issue in detail['issues']}
+    assert 'fixed_too_early' in codes or 'day_overflow' in codes
+    assert any(issue['options'] for issue in detail['issues'])
+    assert client.get('/api/v1/trips/'+t['id']).status_code==404
+
+def test_confirm_refuses_locked_changes_and_keeps_base_version(client,monkeypatch):
+    register(client)
+    async def roads(body):return fast_roads(body)
+    monkeypatch.setattr(app.state.router,'route',roads)
+    t=trip()
+    assert client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0}).status_code==200
+    changed=copy.deepcopy(t);changed['revision']=2;changed['days'][0]['activities'][0]['placeId']='museum'
+    result=client.post('/api/v1/planner/confirm',json={'trip':changed,'baseRevision':1})
+    assert result.status_code==422 and result.json()['detail']['code']=='locked_violation'
+    assert client.get('/api/v1/trips/'+t['id']).json()['revision']==1
+
+def test_requirements_returns_real_candidates_for_each_mention(client,monkeypatch):
+    register(client)
+    calls=[]
+    async def fake(q):
+        calls.append(q)
+        return [{'id':'osm:node:'+str(len(calls)),'name':q+' 候选','address':'杭州'}]
+    monkeypatch.setattr(app.state.search,'search',fake)
+    text='2026-11-14 去杭州两天，两个人，想去西湖和浙工大，喜欢咖啡，少走路，第二天 17:00 前到杭州东站。'
+    response=client.post('/api/v1/planner/requirements',json={'text':text})
+    assert response.status_code==200,response.text
+    data=response.json()
+    assert data['requirements']['returnBy']==1020
+    assert [mention['text'] for mention in data['mentions']]==['西湖','浙江工业大学','杭州东站']
+    assert all(mention['candidates'] for mention in data['mentions'])
+    assert data['suggestions'][0]['name'].startswith('咖啡')
+    assert '浙江工业大学' in calls
+
+def test_requirements_requires_login(client):
+    assert client.post('/api/v1/planner/requirements',json={'text':'去杭州两天'}).status_code==401
+
+def test_one_sentence_to_confirmed_trip_closed_loop(client,monkeypatch):
+    register(client)
+    async def search(q):
+        return [{'id':'amap:'+q,'name':q,'kind':'景点','tag':'搜索确认地点','description':'测试地点','duration':60,'cost':0,
+                 'lng':120.15,'lat':30.26,'x':0,'y':0,'indoor':False,'image':'lake','crs':'GCJ02','provider':'amap'}]
+    monkeypatch.setattr(app.state.search,'search',search)
+    async def roads(body):return fast_roads(body)
+    monkeypatch.setattr(app.state.router,'route',roads)
+    text='2026-11-14 去杭州两天，两个人，想去西湖和浙工大，喜欢咖啡，少走路，第二天 17:00 前到杭州东站。'
+    parsed=client.post('/api/v1/planner/requirements',json={'text':text}).json()
+    mentions={mention['text']:mention for mention in parsed['mentions']}
+    visits=[mentions['西湖']['candidates'][0]['id'],mentions['浙江工业大学']['candidates'][0]['id']]
+    destination=mentions['杭州东站']['candidates'][0]['id']
+    requirements={**parsed['requirements'],'destinationPlaceId':destination}
+    draft=client.post('/api/v1/planner/draft',json={'title':'样例两日','requirements':requirements,'candidateIds':visits,'useModel':False})
+    assert draft.status_code==200,draft.text
+    data=draft.json();assert data['issues']==[]
+    trip=data['trip']
+    confirmed=client.post('/api/v1/planner/confirm',json={'trip':trip,'baseRevision':0})
+    assert confirmed.status_code==200,confirmed.text
+    assert confirmed.json()['revision']==1
+    saved=client.get('/api/v1/trips/'+trip['id']).json()
+    placed=[activity['placeId'] for day in saved['days'] for activity in day['activities']]
+    assert destination in placed and all(place in placed for place in visits)
+    station=[activity for day in saved['days'] for activity in day['activities'] if activity['placeId']==destination][0]
+    assert station['lock']=='fixed' and station['fixedStart']==17*60

@@ -51,3 +51,5 @@ export async function api(path:string,method='GET',body?:unknown,signal?:AbortSi
  return d
 }
 export async function remoteSuggestion(trip:Trip,day:number,prompt:string):Promise<Proposal>{return api('/planner/suggest','POST',{trip,day,prompt})}
+export interface Confirmed {trip:Trip;revision:number;issues:{code:string;message:string}[];idempotent:boolean}
+export function confirmTrip(trip:Trip,baseRevision:number):Promise<Confirmed>{return api('/planner/confirm','POST',{trip,baseRevision})}
