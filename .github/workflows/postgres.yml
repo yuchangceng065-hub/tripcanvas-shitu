@@ -1,0 +1,37 @@
+name: Postgres compatibility
+
+# Manual first: this job has not run yet in CI, so it stays opt-in until it is green once.
+on:
+  workflow_dispatch:
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: tripcanvas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:test@localhost:5432/tripcanvas
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:test@localhost:5432/tripcanvas
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt ruff
+      - name: Migrate an empty Postgres schema
+        run: python -m alembic upgrade head
+      - name: Full backend suite against Postgres
+        run: python -m pytest backend/tests -q

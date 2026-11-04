@@ -218,3 +218,10 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - `app.py` 从 333 行降到 102 行，只保留应用装配、CORS/Origin 校验、请求日志、安全头、生命周期和路由 include；通过 `__all__` 继续兼容导出测试与脚本使用的名称。
 - 修正抽离过程中丢失的两处行为：`locked_violations` 重新校验固定安排的日期；`draft_order` 恢复未知地点/候选数量/起终点校验。
 - 测试：后端 123 项、前端 81 项、Ruff、30/30 离线评测、空库迁移全部通过。
+
+### 2026-11-05：Postgres 兼容性工作流（待首次运行）
+
+- 新增 `.github/workflows/postgres.yml`，手动触发：启动 Postgres 17 service，先 `alembic upgrade head`，再跑完整后端测试。
+- `conftest.py` 支持 `TEST_DATABASE_URL` 覆盖测试库；未设置时仍用临时 SQLite，不影响本地和默认 CI。
+- 本机没有 Docker/Postgres，**该工作流尚未实际运行**；首次手动触发并通过后，才能把“已验证 Postgres”写进能力清单。
+- 当前默认 CI（SQLite）123 项后端、81 项前端、构建、评测、迁移仍全部通过。
