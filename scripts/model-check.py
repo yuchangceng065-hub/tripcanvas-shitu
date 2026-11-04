@@ -14,6 +14,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -34,7 +35,7 @@ def load_env(path: Path = ROOT / '.env') -> None:
 def options_for(base: str, model: str) -> dict:
     name = model.lower()
     options: dict = {'reasoning_effort': 'none'} if base.startswith('https://aihubmix.com') else {}
-    if name in ('coding-glm-5.1-free', 'glm-5.1') or (base.startswith('https://api.z.ai') and (name.startswith('glm-5') or 'flash' in name)):
+    if name in ('coding-glm-5.1-free', 'glm-5.1') or (urlsplit(base).hostname in ('api.z.ai','open.bigmodel.cn') and (name.startswith('glm-5') or 'flash' in name)):
         options['thinking'] = {'type': 'disabled'}
     return options
 
@@ -54,7 +55,7 @@ def main() -> int:
             {'role': 'user', 'content': '返回 {"ok": true, "city": "杭州", "days": 1}'},
         ],
         'response_format': {'type': 'json_object'},
-        'temperature': 0,
+        'temperature': 0.2,
         'max_tokens': 200,
         'stream': False,
         **options_for(base, model),

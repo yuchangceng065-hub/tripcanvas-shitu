@@ -357,6 +357,8 @@ def test_model_options_disable_hidden_thinking_for_glm_providers():
     zai=model_options('https://api.z.ai/api/paas/v4','glm-5.1')
     assert zai['thinking']=={'type':'disabled'}
     assert model_options('https://api.z.ai/api/paas/v4','glm-4.7-flash')['thinking']=={'type':'disabled'}
+    assert model_options('https://open.bigmodel.cn/api/paas/v4','glm-4.7-flash')['thinking']=={'type':'disabled'}
+    assert 'thinking' not in model_options('https://open.bigmodel.cn.invalid/v4','glm-4.7-flash')
     assert 'thinking' not in model_options('https://api.z.ai/api/paas/v4','qwen3')
     hub=model_options('https://aihubmix.com/v1','coding-glm-5.1-free')
     assert hub['reasoning_effort']=='none' and hub['thinking']=={'type':'disabled'}

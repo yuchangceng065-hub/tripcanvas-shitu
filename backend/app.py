@@ -561,7 +561,7 @@ def model_options(base,model):
     """Provider switches that keep hidden reasoning from eating the JSON budget."""
     name=model.lower()
     options={'reasoning_effort':'none'} if base.startswith('https://aihubmix.com') else {}
-    if name in ('coding-glm-5.1-free','glm-5.1') or (base.startswith('https://api.z.ai') and (name.startswith('glm-5') or 'flash' in name)):
+    if name in ('coding-glm-5.1-free','glm-5.1') or (urlsplit(base).hostname in ('api.z.ai','open.bigmodel.cn') and (name.startswith('glm-5') or 'flash' in name)):
         options['thinking']={'type':'disabled'}
     return options
 

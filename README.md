@@ -70,6 +70,7 @@ python3 -m venv .venv
 
 - 高德：`AMAP_WEB_KEY`、`AMAP_JS_KEY`、`AMAP_JS_SECURITY_CODE` 齐备且 `ROUTING_PROVIDER` 不为 `osrm` 时启用；`PUBLIC_API_ORIGIN` 为 API 的 HTTPS 地址，用于 JS 安全代理。
 - 模型：OpenAI 兼容的 `MODEL_BASE_URL` + `MODEL_API_KEY` + `MODEL_NAME`，且 `PLANNER_MODE` 不为 `rules` 才会调用。当前线上为 `rules`。
+  - 智谱国内官方免费款：`https://open.bigmodel.cn/api/paas/v4`，型号 `glm-4.7-flash`；在 [API Keys](https://bigmodel.cn/usercenter/proj-mgmt/apikeys) 创建国内站密钥，不能混用其他供应商的 Key。官方[免费发布说明](https://www.zhipuai.cn/zh/news/148)与[模型文档](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash)。账号限流以控制台为准，尚待用户密钥做真实验证。
   - Z.AI：地址 `https://api.z.ai/api/paas/v4`；免费档可用 `glm-4.7-flash`，`glm-5.1` 是付费旗舰（官方价 $1.4 / $4.4 每百万输入 / 输出 token）。
   - OpenRouter：地址 `https://openrouter.ai/api/v1`，模型 `z-ai/glm-5.1`（付费，没有 `:free` 变体）。
   - AIHubMix：地址 `https://aihubmix.com/v1`，模型 `coding-glm-5.1-free`；本账号试用额度已用尽，需充值或新账号。
