@@ -211,3 +211,10 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 共享服务仍从 `backend.app` 导入（应用在定义完全部辅助函数后才 include 路由），`backend.app` 继续兼容导出 `Trip`、`POIS`、`verify_proposal` 等名称，测试与脚本无需改名。
 - 测试：后端 123 项、前端 81 项、Ruff、离线评测 30/30、空库迁移全部通过。
 - 未做：`draft_order`、`model_json` 等仍留在 `app.py`，可后续再抽成 `services` 模块。
+
+### 2026-11-05：共享服务抽离
+
+- 把会话/限流/预算抽到 `backend/security.py`，行程持久化/差异校验/地点写入抽到 `backend/store.py`，模型 JSON 调用与排序种子抽到 `backend/model_gateway.py`。
+- `app.py` 从 333 行降到 102 行，只保留应用装配、CORS/Origin 校验、请求日志、安全头、生命周期和路由 include；通过 `__all__` 继续兼容导出测试与脚本使用的名称。
+- 修正抽离过程中丢失的两处行为：`locked_violations` 重新校验固定安排的日期；`draft_order` 恢复未知地点/候选数量/起终点校验。
+- 测试：后端 123 项、前端 81 项、Ruff、30/30 离线评测、空库迁移全部通过。

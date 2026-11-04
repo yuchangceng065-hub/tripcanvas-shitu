@@ -106,7 +106,7 @@ def test_dynamic_place_is_authoritative_persistent_and_shared(client,monkeypatch
     assert client.get('/api/v1/public/shares/'+share['token']).json()['placeSnapshots'][0]['id']==place['id']
 
 def test_model_cannot_invent_candidates(client,monkeypatch):
-    import backend.app as module
+    import backend.model_gateway as module
     register(client)
     async def hallucinate(system,data):return {'days':[['invented']]}
     monkeypatch.setattr(module,'model_json',hallucinate)
