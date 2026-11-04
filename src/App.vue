@@ -13,7 +13,7 @@ import {ApiError} from './apiError'
 import { useTrips } from './store'
 import { places,placeById,createTrip,clone,uid,time,schedule,validate,suggest,lockedChanges,registerPlaces,capturePlaces,departureDelay,departureProposal,validDepartureProposal,proposalErrors,returnAnchor,type Trip,type Activity,type Proposal,type Place,type Mobility } from './domain'
 import {checkAPI,api,remoteSuggestion,setToken,connection,backendConfigured,confirmTrip} from './api'
-import {useRoadRoutes,routeKey,loadRoute,type RouteMap} from './routes'
+import {useRoadRoutes,routeKey,loadRoute,walkingKm,type RouteMap} from './routes'
 const store=useTrips()
 const page=ref<'canvas'|'trips'|'favorites'>('canvas'),dayIndex=ref(0),selected=ref(''),modal=ref(''),toast=ref(''),search=ref(''),dragging=ref(''),tabMobile=ref('plan')
 const trip=computed(()=>store.trips.find(t=>t.id===store.activeId)||store.trips[0]!)
@@ -22,6 +22,7 @@ const entries=computed(()=>schedule(trip.value,dayIndex.value,roadRoutes.value[r
 const routeReady=computed(()=>routeState.value.status==='ready'||entries.value.length<2)
 const checkedDays=computed(()=>trip.value.days.filter((d,i)=>d.activities.length<2||roadRoutes.value[routeKey(trip.value,i)]).length)
 const currentRoadRoute=computed(()=>roadRoutes.value[routeKey(trip.value,dayIndex.value)])
+const dayWalk=computed(()=>walkingKm(currentRoadRoute.value,trip.value.mode))
 const mixedRoute=computed(()=>currentRoadRoute.value?.source==='amap')
 const selectedEntry=computed(()=>entries.value.find(e=>e.activity.id===selected.value))
 const allIssues=computed(()=>validate(trip.value,roadRoutes.value)),errors=computed(()=>allIssues.value.filter(x=>x.severity==='error'))
@@ -226,7 +227,7 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';await check
      <div class="panel-heading"><h2>每日行程 <span>{{trip.days.length}} DAYS</span></h2><div class="plan-heading-actions"><button class="icon-button" @click="openModal('search')" :disabled="busy" aria-label="搜索地点并加入当天路线" title="添加想去的地点"><Plus :size="18"/></button><button class="icon-button" @click="openModal('trip-settings')" aria-label="行程设置"><Settings2 :size="17"/></button></div></div>
      <div class="day-tabs"><button v-for="(d,i) in trip.days" :key="d.date" :class="{active:dayIndex===i}" @click="changeDay(i)"><strong>Day {{i+1}}</strong><span>{{shortDate(d.date)}} · {{weekday(d.date)}}</span></button></div>
      <div v-if="connection.routing==='amap'&&trip.mode==='drive'" class="transport-settings-bar"><button @click="openModal('mobility')" :disabled="busy"><Car :size="14"/>交通与停车<ChevronRight :size="13"/></button><small>{{currentRoadRoute?.accessConfirmed?'已选择停车点':'停车点待确认'}}</small></div>
-     <div class="day-overview"><div><span class="tiny-dot"/>{{dayIndex===0?'沿着西湖，慢慢走':dayIndex===1?'南岸的人文与树影':'留给喜欢的风景'}}</div><button @click="setMode" :title="'切换交通方式'"><Footprints v-if="trip.mode==='walk'" :size="14"/><Car v-else :size="14"/>{{trip.mode==='walk'?'步行':connection.routing==='amap'?'自驾＋步行':'驾车'}}<ChevronDown :size="12"/></button></div>
+     <div class="day-overview"><div><span class="tiny-dot"/>{{dayIndex===0?'沿着西湖，慢慢走':dayIndex===1?'南岸的人文与树影':'留给喜欢的风景'}}<span v-if="dayWalk!==null" class="walk-chip">步行 {{dayWalk.toFixed(1)}} km</span></div><button @click="setMode" :title="'切换交通方式'"><Footprints v-if="trip.mode==='walk'" :size="14"/><Car v-else :size="14"/>{{trip.mode==='walk'?'步行':connection.routing==='amap'?'自驾＋步行':'驾车'}}<ChevronDown :size="12"/></button></div>
      <div class="timeline-scroll">
       <div v-if="!entries.length" class="empty-state"><MapPin :size="32"/><p>今天，留给新的发现。</p><button @click="openModal('search')" class="button quiet">添加一个地点</button></div>
       <template v-for="(entry,index) in entries" :key="entry.activity.id">

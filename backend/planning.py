@@ -17,6 +17,7 @@ class Requirements(BaseModel):
     originPlaceId:str|None=None
     destinationPlaceId:str|None=None
     returnBy:int|None=Field(default=None,ge=0,le=1439)
+    walkBudgetKm:float|None=Field(default=None,ge=0.5,le=30)
     @model_validator(mode='after')
     def valid(self):
         if self.end<=self.start:raise ValueError('结束时间须晚于出发时间')
@@ -70,6 +71,21 @@ def _shorten_options(day,before,minutes):
             options.append({'action':'shorten','activityId':activity.id,'minutes':min(minutes,activity.duration-30)})
     return options
 
+def _lunch_blocked(intervals):
+    """True when 11:30-13:30 has no 40-minute gap at all (travel included)."""
+    lunch_start,lunch_end=690,810
+    overlaps=sorted((max(start,lunch_start),min(end,lunch_end)) for start,end in intervals if end>lunch_start and start<lunch_end)
+    if not overlaps:return False
+    merged=[]
+    for start,end in overlaps:
+        if merged and start<=merged[-1][1]:merged[-1]=(merged[-1][0],max(merged[-1][1],end))
+        else:merged.append((start,end))
+    cursor=lunch_start
+    for start,end in merged:
+        if start-cursor>=40:return False
+        cursor=max(cursor,end)
+    return lunch_end-cursor<40
+
 def evaluate(trip,routes,pois):
     """One authoritative hard-constraint pass. Unknown roads never count as feasible."""
     issues=[]
@@ -80,12 +96,13 @@ def evaluate(trip,routes,pois):
             issues.append({'code':'route_missing','severity':'error','day':index,'activityId':None,
                 'message':f'第 {index+1} 天缺少真实道路路线，无法确认可行','options':[{'action':'retry_route','day':index}]})
             continue
-        end=day.start
+        end=day.start;intervals=[]
         for position,activity in enumerate(day.activities):
             minutes=legs[position-1].get('minutes',0) if legs and position else 0
             earliest=end+minutes
             start=activity.fixedStart if activity.lock=='fixed' and activity.fixedStart is not None else earliest
             end=start+activity.duration
+            intervals.append((start,end))
             if start<earliest:
                 late=earliest-start
                 options=_shorten_options(day,position,late)
@@ -103,6 +120,16 @@ def evaluate(trip,routes,pois):
                     'message':f'第 {index+1} 天超出结束时间 {over} 分钟（{pois[activity.placeId]["name"]} 结束于 {end//60:02d}:{end%60:02d}）',
                     'options':options})
         requirements=getattr(trip,'requirements',None)
+        budget=getattr(requirements,'walkBudgetKm',None) if requirements else None
+        if budget is not None:
+            distance=walking_km(route,getattr(trip,'mode','walk'))
+            if distance is not None and distance>budget+0.05:
+                issues.append({'code':'walk_budget','severity':'error','day':index,'activityId':None,
+                    'message':f'第 {index+1} 天步行约 {distance:.1f} km，超过每日预算 {budget:g} km',
+                    'options':[{'action':'drop','activityId':item.id} for item in day.activities if item.lock=='none'][:3]})
+        if _lunch_blocked(intervals):
+            issues.append({'code':'meal_break','severity':'warning','day':index,'activityId':None,
+                'message':f'第 {index+1} 天 11:30—13:30 没有 40 分钟以上空档，用餐和休息可能被压缩','options':[]})
         if index==len(trip.days)-1 and requirements and requirements.returnBy is not None and day.activities:
             last=day.activities[-1]
             last_start=_activity_start(day,legs,last)
@@ -111,6 +138,19 @@ def evaluate(trip,routes,pois):
                     'message':f'第 {index+1} 天最早 {last_start//60:02d}:{last_start%60:02d} 才能到达 {pois[last.placeId]["name"]}，晚于要求的 {requirements.returnBy//60:02d}:{requirements.returnBy%60:02d}',
                     'options':[{'action':'shorten','activityId':a.id,'minutes':last_start-requirements.returnBy} for a in day.activities if a.lock=='none']})
     return issues
+
+def walking_km(route,mode):
+    """Walking distance for one day; None when the provider cannot separate it."""
+    if not isinstance(route,dict):return None
+    legs=route.get('legs') or []
+    if route.get('source')=='amap':
+        total=0.0
+        for leg in legs:
+            for segment in leg.get('segments',[]) or []:
+                if segment.get('mode')=='walk':total+=float(segment.get('distance') or 0)
+        return total
+    if mode=='walk':return sum(float(leg.get('distance') or 0) for leg in legs)
+    return None
 
 def _activity_start(day,legs,activity):
     end=day.start

@@ -326,3 +326,28 @@ def test_one_sentence_to_confirmed_trip_closed_loop(client,monkeypatch):
     assert destination in placed and all(place in placed for place in visits)
     station=[activity for day in saved['days'] for activity in day['activities'] if activity['placeId']==destination][0]
     assert station['lock']=='fixed' and station['fixedStart']==17*60
+
+def test_walk_budget_is_a_hard_constraint_with_drop_options(client,monkeypatch):
+    register(client)
+    async def walked(body):
+        return {'source':'amap','crs':'GCJ02','legs':[{'distance':2.0,'minutes':30,
+            'segments':[{'mode':'walk','distance':2.0,'minutes':30}]} for _ in body.placeIds[1:]]}
+    monkeypatch.setattr(app.state.router,'route',walked)
+    body=draft_body();body['requirements']['walkBudgetKm']=0.5
+    data=client.post('/api/v1/planner/draft',json=body).json()
+    budget=[issue for issue in data['issues'] if issue['code']=='walk_budget']
+    assert budget and budget[0]['severity']=='error'
+    assert any(option['action']=='drop' for option in budget[0]['options'])
+    confirmed=client.post('/api/v1/planner/confirm',json={'trip':data['trip'],'baseRevision':0})
+    assert confirmed.status_code==422 and confirmed.json()['detail']['code']=='infeasible'
+
+def test_lunch_gap_warns_but_does_not_block_confirmation(client,monkeypatch):
+    register(client)
+    async def roads(body):return {'source':'osrm','legs':[{'minutes':10,'distance':.6} for _ in body.placeIds[1:]]}
+    monkeypatch.setattr(app.state.router,'route',roads)
+    body=draft_body();body['candidateIds']=['museum','quyuan','baidi']
+    data=client.post('/api/v1/planner/draft',json=body).json()
+    meals=[issue for issue in data['issues'] if issue['code']=='meal_break']
+    assert meals and meals[0]['severity']=='warning'
+    confirmed=client.post('/api/v1/planner/confirm',json={'trip':data['trip'],'baseRevision':0})
+    assert confirmed.status_code==200,confirmed.text

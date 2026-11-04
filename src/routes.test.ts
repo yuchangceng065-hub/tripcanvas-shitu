@@ -1,7 +1,7 @@
 import { describe,it,expect,vi,afterEach } from 'vitest'
 import { createRenderer,ref,nextTick } from 'vue'
 import { createTrip,clone,schedule,validate } from './domain'
-import { matchesRoute,routeKey,normalizeOSRM,useRoadRoutes,validRoute,type RoadRoute } from './routes'
+import { matchesRoute,routeKey,normalizeOSRM,useRoadRoutes,validRoute,walkingKm,type RoadRoute } from './routes'
 import { api } from './api'
 vi.mock('./api',()=>({connection:{routing:'osrm',map:'osm'},apiAvailable:true,backendConfigured:true,checkAPI:vi.fn(async()=>({status:'ok'})),api:vi.fn()}))
 function road(ids:string[],minutes=20):RoadRoute{return {mode:'walk',placeIds:ids,source:'osrm',legs:ids.slice(1).map(()=>({minutes,distance:1.5})),geometry:{type:'LineString',coordinates:[[120.13,30.25],[120.14,30.26]]},waypoints:ids.map(()=>({location:[120.13,30.25],distance:0})),fetchedAt:Date.now(),cached:false}}
@@ -37,4 +37,20 @@ describe('高德混合交通与停车条件',()=>{
  it('完整转场用时进入时间轴，不能只计算驾车的10分钟',()=>{const t=createTrip(),r=mixed(t);expect(schedule(t,0,r)[1]!.travel).toBe(21)})
  it('拒绝缺少步行路线、分段合计错误和坐标系缺失的结果',()=>{const t=createTrip(),r=mixed(t);expect(validRoute(r,'drive',r.placeIds)).toBe(true);r.legs[0]!.minutes=10;expect(validRoute(r,'drive',r.placeIds)).toBe(false);r.legs[0]!.minutes=21;delete r.crs;expect(validRoute(r,'drive',r.placeIds)).toBe(false)})
  it('改变停车点或停车预留后，旧路线失效并生成不同缓存键',()=>{const t=createTrip(),r=mixed(t),key=routeKey(t,0);t.mobility={parkingByPlace:{quyuan:'amap:another-parking'},parkingMinutes:10};expect(routeKey(t,0)).not.toBe(key);expect(matchesRoute(t,0,r)).toBe(false)})
+})
+
+describe('步行距离统计',()=>{
+ it('步行模式累加路段，驾车只统计步行接驳',()=>{
+  const t=createTrip()
+  const walk=walkingKm(road(t.days[0]!.activities.map(a=>a.placeId)),'walk')
+  expect(walk).toBeCloseTo(6)
+  const mixed:RoadRoute={...road(['a','b']),source:'amap',mode:'drive',legs:[{distance:2.4,minutes:12,segments:[
+   {mode:'walk',label:'步行回停车点',distance:0.6,minutes:8,estimated:false},
+   {mode:'drive',label:'驾车',distance:1.5,minutes:4,estimated:false},
+   {mode:'walk',label:'步行到景点',distance:0.3,minutes:4,estimated:false}]}]}
+  expect(walkingKm(mixed,'drive')).toBeCloseTo(0.9)
+  expect(walkingKm(undefined,'walk')).toBeNull()
+  const drive:RoadRoute={...road(['a','b']),mode:'drive'}
+  expect(walkingKm(drive,'drive')).toBeNull()
+ })
 })

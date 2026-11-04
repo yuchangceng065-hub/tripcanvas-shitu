@@ -16,6 +16,11 @@ export interface RoadRoute {
  accessConfirmed?:boolean;parkingByPlace?:Record<string,string>;parkingMinutes?:number;warnings?:string[]
  fetchedAt:number;expiresAt?:number;cached:boolean
 }
+export function walkingKm(route?:RoadRoute,mode?:Trip['mode']):number|null{
+ if(!route)return null
+ if(route.source==='amap')return route.legs.reduce((total,leg)=>total+(leg.segments??[]).filter(segment=>segment.mode==='walk').reduce((sum,segment)=>sum+segment.distance,0),0)
+ return mode==='walk'?route.legs.reduce((sum,leg)=>sum+leg.distance,0):null
+}
 export type RouteState = {status: 'loading'|'ready'|'error'|'empty'; route?: RoadRoute; error?: string}
 export type RouteMap = Record<string, RoadRoute>
 const ttl = 24 * 60 * 60 * 1000
