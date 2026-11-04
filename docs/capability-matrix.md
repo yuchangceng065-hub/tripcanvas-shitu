@@ -38,6 +38,7 @@
 | CI（测试/构建/评测/迁移） | 已验证 | GitHub Actions：pytest、vitest、build、30 条离线评测、空库 Alembic |
 | 数据库迁移（Alembic） | 已验证（基线） | 基线迁移与模型一致；线上既有库首次接入需 `stamp head` |
 | 可观测性 | 部分 | health 返回 commit、X-Request-ID 与请求日志、基础安全头；无指标/追踪系统 |
+| PostgreSQL 兼容性 | 已验证 | CI 在 Postgres 17 上执行迁移与 123 项后端测试（run 41902369499） |
 | 高德预算、限速、有界缓存 | 已验证 | `provider_usage` 原子扣减；达到预算 429，不自动升级 |
 | 数据库迁移体系（Alembic） | 未实现 | 当前 SQLAlchemy 自动建表 |
 | 固定任务评测集（30 条） | 已验证（工程） | 10开发+20非盲回归，30/30；零模型/外部请求，真实模型另测；见 evaluation.md |
@@ -83,4 +84,4 @@
 
 - 前端 81 项、后端 121 项、离屏评测 30/30、构建通过；CI 见 `.github/workflows/ci.yml`。
 - 新增 Alembic 基线、health `commit`、X-Request-ID 请求日志、基础安全头、多方案每用户日限额、方案时长显示修复。
-- 仍未做：拆分 `app.py` 单文件、真实指标/追踪系统、多实例部署、Git 历史整理。
+- 仍未做：真实指标/追踪系统、多实例部署。

@@ -225,3 +225,11 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - `conftest.py` 支持 `TEST_DATABASE_URL` 覆盖测试库；未设置时仍用临时 SQLite，不影响本地和默认 CI。
 - 本机没有 Docker/Postgres，**该工作流尚未实际运行**；首次手动触发并通过后，才能把“已验证 Postgres”写进能力清单。
 - 当前默认 CI（SQLite）123 项后端、81 项前端、构建、评测、迁移仍全部通过。
+
+### 2026-11-05：Postgres 工作流首次运行通过
+
+- 历史整理后提交 `fe8a199` 触发手动工作流：Postgres 17 service → `alembic upgrade head` → 123 项后端测试，全部通过。
+  运行链接：https://github.com/yuchangceng065-hub/tripcanvas-shitu/actions/runs/41902369499
+- 同提交的 CI 也通过（run 41902370473）；Render 自动部署后 `/health` 返回 `commit=fe8a199a3309`。
+- Git 历史整理为 9 个里程碑提交并 force push；旧历史保留在本地分支 `backup/pre-clean`（未推送）。
+- 能力清单中“PostgreSQL 兼容性”更新为已验证。
