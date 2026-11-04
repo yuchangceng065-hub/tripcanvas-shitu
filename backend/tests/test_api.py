@@ -360,3 +360,38 @@ def test_model_options_disable_hidden_thinking_for_glm_providers():
     assert 'thinking' not in model_options('https://api.z.ai/api/paas/v4','qwen3')
     hub=model_options('https://aihubmix.com/v1','coding-glm-5.1-free')
     assert hub['reasoning_effort']=='none' and hub['thinking']=={'type':'disabled'}
+
+def test_model_mode_calls_an_openai_compatible_provider(client,monkeypatch):
+    import http.server,json,threading
+    calls=[]
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body=json.loads(self.rfile.read(int(self.headers.get('content-length',0))))
+            calls.append({'path':self.path,'auth':self.headers.get('authorization'),'body':body})
+            user=json.loads(body['messages'][1]['content'])
+            content=json.dumps({'days':[list(reversed(user['candidateIds']))]},ensure_ascii=False)
+            payload=json.dumps({'choices':[{'message':{'content':content},'finish_reason':'stop'}]}).encode()
+            self.send_response(200);self.send_header('content-type','application/json')
+            self.send_header('content-length',str(len(payload)));self.end_headers();self.wfile.write(payload)
+        def log_message(self,*args):pass
+    server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    threading.Thread(target=server.serve_forever,daemon=True).start()
+    try:
+        monkeypatch.setenv('MODEL_BASE_URL',f'http://127.0.0.1:{server.server_port}/v1')
+        monkeypatch.setenv('MODEL_API_KEY','test-key')
+        monkeypatch.setenv('MODEL_NAME','glm-4.7-flash')
+        monkeypatch.setenv('PLANNER_MODE','auto')
+        async def roads(body):return fast_roads(body)
+        monkeypatch.setattr(app.state.router,'route',roads)
+        register(client)
+        body=draft_body();body['useModel']=True
+        response=client.post('/api/v1/planner/draft',json=body)
+        assert response.status_code==200,response.text
+        assert response.json()['source']=='model'
+        assert calls[0]['path']=='/v1/chat/completions'
+        assert calls[0]['auth']=='Bearer test-key'
+        assert calls[0]['body']['response_format']=={'type':'json_object'}
+        assert calls[0]['body']['model']=='glm-4.7-flash'
+        places=[a['placeId'] for d in response.json()['trip']['days'] for a in d['activities']]
+        assert places==['quyuan','museum']
+    finally:server.shutdown()

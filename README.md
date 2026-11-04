@@ -61,7 +61,7 @@ python3 -m venv .venv
 .venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000
 ```
 
-后端启动后刷新前端，点右上角账号按钮注册。接口文档：http://127.0.0.1:8000/docs 。本地示例数据库创建在 backend/tripcanvas.db，不提交仓库；单元测试使用 SQLite。
+后端启动时若项目根目录存在 `.env` 会自动读取（不覆盖已设置的环境变量），可放本地 `MODEL_*` 配置。后端启动后刷新前端，点右上角账号按钮注册。接口文档：http://127.0.0.1:8000/docs 。本地示例数据库创建在 backend/tripcanvas.db，不提交仓库；单元测试使用 SQLite。
 
 ## 配置
 

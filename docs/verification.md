@@ -125,3 +125,10 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 代码：抽出 `model_options`，Z.AI 的 GLM-5 / Flash 默认关闭隐藏思考，避免输出预算被推理占满；新增 `scripts/model-check.py`（读取 `.env` 或环境变量，发一条最小 JSON 请求，不打印密钥）；`.env.example` 与 README 增加三家 provider 预设。
 - 测试：后端 54 项通过、前端 64 项、构建通过。
 - 未启用：需要用户提供密钥并设置 `PLANNER_MODE=auto`；线上未改配置、未重启、未产生任何模型调用费用。
+
+### 模型模式端到端（本地假供应商，2026-11-04）
+
+- `.env` 现在会被后端自动读取（`setdefault`，真实环境变量优先）；本地已放 Z.AI 预设，密钥为空时自动退回规则模式。
+- `model_json` 增加 401/403、429、404 的分类提示，避免所有失败都显示成“服务不可用”。
+- 新增测试：用本机 HTTP 假供应商模拟 OpenAI 兼容接口，验证请求路径 `/v1/chat/completions`、Bearer 头、`response_format=json_object`、模型名与返回排序被采用；`/planner/draft` 的 `source` 变为 `model`。
+- 后端 55 项通过；真实 Z.AI 调用仍缺密钥，未产生费用。

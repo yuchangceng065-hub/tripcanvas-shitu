@@ -21,6 +21,17 @@ from backend.planning import Requirements, DraftBody, Order, check_order, evalua
 from backend.requirements import parse_request
 
 ROOT=Path(__file__).parent
+
+def load_local_env(path=ROOT.parent/'.env'):
+    """Optional .env for local runs; real environment variables win."""
+    if not path.exists():return
+    for line in path.read_text(encoding='utf-8').splitlines():
+        line=line.strip()
+        if not line or line.startswith('#') or '=' not in line:continue
+        key,value=line.split('=',1)
+        os.environ.setdefault(key.strip(),value.strip().strip('"').strip("'"))
+load_local_env()
+
 PLACES=json.loads((ROOT/'places.json').read_text())
 POIS={p['id']:p for p in PLACES}
 DATABASE_URL=os.getenv('DATABASE_URL',f'sqlite:///{ROOT / "tripcanvas.db"}')
@@ -562,6 +573,12 @@ async def model_json(system,data,*,validate=None):
             # Validation errors may contain inputs; only a bounded safe reason is sent.
             reason=str(error) if type(error) is ValueError else '输出字段不符合规定结构'
             messages.append({'role':'user','content':'修正上一次输出。'+reason[:180]+'。请仅输出要求的 JSON 对象；锁定和固定活动从 currentDay 原样复制，不要修改。'})
+        except httpx.HTTPStatusError as error:
+            status=error.response.status_code
+            if status in (401,403):raise HTTPException(503,'模型密钥无效或没有该模型权限，请检查 MODEL_API_KEY')
+            if status==429:raise HTTPException(503,'模型服务限流或额度不足，请稍后重试或切换规则草案')
+            if status==404:raise HTTPException(503,'模型地址或名称不正确，请检查 MODEL_BASE_URL / MODEL_NAME')
+            raise HTTPException(502,'模型服务返回错误，原行程未修改')
         except httpx.HTTPError:raise HTTPException(502,'模型服务暂不可用或免费额度已用完，请重试或选择规则草案')
 
 class RequestBody(StrictModel):
