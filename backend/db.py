@@ -109,3 +109,14 @@ class Run(Base):
     result: Mapped[str] = mapped_column(Text)
     created: Mapped[float] = mapped_column(Float)
     applied: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class RunEvent(Base):
+    __tablename__ = 'run_events'
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    run_id: Mapped[str] = mapped_column(String, index=True)
+    seq: Mapped[int] = mapped_column(Integer)
+    phase: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)
+    detail: Mapped[str] = mapped_column(Text)
+    created: Mapped[float] = mapped_column(Float)

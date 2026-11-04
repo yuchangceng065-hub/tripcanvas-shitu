@@ -196,3 +196,11 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - Alembic `env.py` 改为直接从 `backend.db` 读取 `Base`/`DATABASE_URL`，不再导入整个应用。
 - 兼容性：测试与脚本继续从 `backend.app` 导入 `Base`、`SessionLocal`、`Trip` 等名称；121 项后端测试、Ruff 与迁移测试全部通过。
 - 未做：路由仍集中在 `app.py`，下一步可按 auth/trips/planner/places/map 拆成 `APIRouter`。
+
+### 2026-11-05：真实运行事件
+
+- 新增 `run_events` 表（迁移 `8a402d074571`）与 `backend/runlog.py`；`/planner/alternatives`、`/planner/draft`、`/planner/suggest` 按 requirements → model/rules → search/validation → completed 落库，失败记录 failed。
+- `/runs/{id}` 返回结果摘要与事件列表；`/runs/{id}/events` 按 `Last-Event-ID` 游标回放真实事件，替换原来的单条假 `complete`。
+- 响应新增 `runId`；规划/草案/建议不再出现“假 SSE”。
+- 测试：草案事件顺序与游标补取、建议的 model_started/validation/completed；后端 123 项通过。
+- 边界：仍是请求内同步写入 + 回放，不是后台任务队列或长连接推送；进程重启不续跑。

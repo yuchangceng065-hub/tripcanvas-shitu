@@ -546,3 +546,33 @@ def test_health_exposes_commit_and_security_headers(client,monkeypatch):
     assert response.headers['X-Frame-Options']=='DENY'
     bad=client.get('/api/v1/health',headers={'X-Request-ID':'bad id with spaces'})
     assert bad.headers['X-Request-ID']!='bad id with spaces' and len(bad.headers['X-Request-ID'])==12
+
+def test_draft_records_real_run_events(client,monkeypatch):
+    register(client)
+    async def roads(body):return fast_roads(body)
+    monkeypatch.setattr(app.state.router,'route',roads)
+    data=client.post('/api/v1/planner/draft',json=draft_body()).json()
+    run_id=data['runId']
+    payload=client.get('/api/v1/runs/'+run_id).json()
+    phases=[event['phase'] for event in payload['events']]
+    assert phases[0]=='requirements' and phases[-1]=='completed'
+    assert payload['status']=='completed' and payload['steps']>=3
+    sse=client.get('/api/v1/runs/'+run_id+'/events')
+    assert 'event: requirements' in sse.text and 'event: completed' in sse.text
+    later=client.get('/api/v1/runs/'+run_id+'/events',headers={'Last-Event-ID':'2'})
+    assert 'event: requirements' not in later.text and 'event: completed' in later.text
+
+def test_suggest_records_model_run_phases(client,monkeypatch):
+    register(client);trip_data=trip();client.put('/api/v1/trips/'+trip_data['id'],json={'trip':trip_data})
+    import backend.app as module
+    monkeypatch.setenv('MODEL_BASE_URL','https://example.invalid/v1')
+    monkeypatch.setenv('MODEL_NAME','glm-4.7-flash')
+    monkeypatch.setenv('MODEL_API_KEY','test-key')
+    async def fake_model(system,data,**kwargs):
+        day=data['currentDay']
+        return {'summary':'调整','changes':[],'start':day['start'],'activities':day['activities']}
+    monkeypatch.setattr(module,'model_json',fake_model)
+    proposal=client.post('/api/v1/planner/suggest',json={'trip':trip_data,'day':0,'prompt':'晚一点'}).json()
+    assert proposal.get('runId'),proposal
+    events=client.get('/api/v1/runs/'+proposal['runId']).json()['events']
+    assert [event['phase'] for event in events]==['model_started','validation','completed']

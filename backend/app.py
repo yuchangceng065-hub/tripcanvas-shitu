@@ -19,6 +19,7 @@ from backend.alternatives import PlanSearch
 from backend.model_metrics import current_metrics,empty_metrics,record_usage
 from backend.requirements import parse_request
 from backend.model_config import model_api_key,model_key_name,model_options
+from backend.runlog import RunRecorder, events_for, run_payload
 
 from backend.db import (DATABASE_URL, engine, SessionLocal, Base, User, AuthSession, TripRow,
                         VersionRow, Share, PlaceRecord, ProviderUsage, Run)
@@ -541,27 +542,46 @@ async def alternatives(data:AlternativesBody,request:Request,user:User=Depends(c
     if request.app.state.alternatives_lock.locked():raise HTTPException(429,'正在核验其他方案，请稍后重试')
     reserve_user_daily(user.id,'plans',int(os.getenv('PLAN_DAILY_LIMIT','8')))
     if len(data.candidateIds)>data.requirements.days*10:raise HTTPException(422,'候选过多，请减少地点或增加旅行天数，每日最多十个游览候选')
-    async with request.app.state.alternatives_lock:
-        data.requirements.mustVisitIds=[id for id in data.candidateIds if id not in data.optionalIds]
-        order,source,sort_pois=await draft_order(data,request)
-        anchors=[id for id in (data.requirements.originPlaceId,data.requirements.destinationPlaceId) if id]
-        if amap_enabled() and anchors:
-            coords=await request.app.state.amap.coordinates(anchors)
-            sort_pois={**sort_pois,**{id:{**POIS[id],'lng':coords[id][0],'lat':coords[id][1]} for id in anchors}}
-        search=PlanSearch(data,POIS,sort_pois,request.app.state.router.route,Trip.model_validate)
-        result=await search.search(order)
-        result['source']='model+search' if source=='model' else 'constraint-search'
-        result['modelUsage']=request.state.model_metrics
-        return result
+    recorder=RunRecorder(user.id,'',0,'alternatives')
+    try:
+        recorder.event('requirements',detail={'candidates':len(data.candidateIds),'optional':len(data.optionalIds),'days':data.requirements.days})
+        async with request.app.state.alternatives_lock:
+            data.requirements.mustVisitIds=[id for id in data.candidateIds if id not in data.optionalIds]
+            order,source,sort_pois=await draft_order(data,request)
+            recorder.event('model' if source=='model' else 'rules',detail={'usage':request.state.model_metrics})
+            anchors=[id for id in (data.requirements.originPlaceId,data.requirements.destinationPlaceId) if id]
+            if amap_enabled() and anchors:
+                coords=await request.app.state.amap.coordinates(anchors)
+                sort_pois={**sort_pois,**{id:{**POIS[id],'lng':coords[id][0],'lat':coords[id][1]} for id in anchors}}
+            search=PlanSearch(data,POIS,sort_pois,request.app.state.router.route,Trip.model_validate)
+            result=await search.search(order)
+            recorder.event('search',detail=result.get('search'))
+            result['source']='model+search' if source=='model' else 'constraint-search'
+            result['modelUsage']=request.state.model_metrics
+            result['runId']=recorder.id
+            recorder.event('validation',detail={'options':len(result.get('options',[])),'unavailable':len(result.get('unavailable',[]))})
+            recorder.complete({'runId':recorder.id,'options':len(result.get('options',[])),'source':result['source']})
+            return result
+    except Exception as error:
+        recorder.fail(getattr(error,'detail',error));raise
 
 @app.post('/api/v1/planner/draft')
 async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
     throttle('draft:'+user.id,6)
-    order,source,_=await draft_order(data,request)
-    trip=Trip.model_validate(make_trip(data,order,POIS));routes={}
-    for i,day in enumerate(trip.days):
-        if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(trip,day))
-    return {'trip':snapshot(trip),'source':source,'issues':evaluate(trip,routes,POIS),'routes':routes,'modelUsage':request.state.model_metrics,'warnings':['营业时间、票价、停车与进出景区时间待确认。','草案仅使用你确认的候选地点；保存前请核对。']}
+    recorder=RunRecorder(user.id,'',0,'draft')
+    try:
+        recorder.event('requirements',detail={'candidates':len(data.candidateIds),'days':data.requirements.days})
+        order,source,_=await draft_order(data,request)
+        recorder.event('model' if source=='model' else 'rules',detail={'usage':request.state.model_metrics})
+        trip=Trip.model_validate(make_trip(data,order,POIS));routes={}
+        for i,day in enumerate(trip.days):
+            if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(trip,day))
+        issues=evaluate(trip,routes,POIS)
+        recorder.event('validation',detail={'errors':sum(1 for i in issues if i['severity']=='error'),'warnings':sum(1 for i in issues if i['severity']!='error')})
+        recorder.complete({'runId':recorder.id,'source':source,'tripId':trip.id})
+        return {'trip':snapshot(trip),'source':source,'issues':issues,'routes':routes,'runId':recorder.id,'modelUsage':request.state.model_metrics,'warnings':['营业时间、票价、停车与进出景区时间待确认。','草案仅使用你确认的候选地点；保存前请核对。']}
+    except Exception as error:
+        recorder.fail(getattr(error,'detail',error));raise
 
 @app.post('/api/v1/planner/suggest')
 async def plan(data:SuggestionBody,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
@@ -577,21 +597,32 @@ async def plan(data:SuggestionBody,request:Request,user:User=Depends(current_use
         result=ModelResult(summary=edit.summary,changes=edit.changes,trip=Trip.model_validate(candidate))
         verify_proposal(data.trip,result.trip,data.day)
         return result
-    output=await model_json(system,{'currentDay':data.trip.days[data.day].model_dump(mode='json',exclude_none=True),'requirements':data.trip.requirements.model_dump(mode='json',exclude_none=True) if data.trip.requirements else None,'mode':data.trip.mode,'request':data.prompt,'places':list({p['id']:p for p in PLACES+[POIS[a.placeId] for d in data.trip.days for a in d.activities]}.values())},validate=validate_edit)
+    recorder=RunRecorder(user.id,data.trip.id,data.trip.revision,'suggest')
     try:
-        result=validate_edit(output)
-    except ValueError:raise HTTPException(422,'模型建议未通过结构或锁定检查，原行程未修改')
-    id=str(uuid.uuid4());proposal={'id':id,'baseRevision':data.trip.revision,'trip':snapshot(result.trip),'summary':result.summary,'changes':result.changes,'source':'model','modelUsage':request.state.model_metrics}
-    s.add(Run(id=id,owner=user.id,trip_id=data.trip.id,base_revision=data.trip.revision,result=json.dumps(proposal),created=time.time()));s.commit();return proposal
+        recorder.event('model_started')
+        output=await model_json(system,{'currentDay':data.trip.days[data.day].model_dump(mode='json',exclude_none=True),'requirements':data.trip.requirements.model_dump(mode='json',exclude_none=True) if data.trip.requirements else None,'mode':data.trip.mode,'request':data.prompt,'places':list({p['id']:p for p in PLACES+[POIS[a.placeId] for d in data.trip.days for a in d.activities]}.values())},validate=validate_edit)
+        recorder.event('validation',detail={'usage':request.state.model_metrics})
+        try:
+            result=validate_edit(output)
+        except ValueError:raise HTTPException(422,'模型建议未通过结构或锁定检查，原行程未修改')
+        id=str(uuid.uuid4());proposal={'id':id,'baseRevision':data.trip.revision,'trip':snapshot(result.trip),'summary':result.summary,'changes':result.changes,'source':'model','runId':recorder.id,'modelUsage':request.state.model_metrics}
+        recorder.complete({'proposal':proposal,'runId':recorder.id})
+        return proposal
+    except Exception as error:
+        recorder.fail(getattr(error,'detail',error));raise
 @app.get('/api/v1/runs/{id}')
 def get_run(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
     r=s.get(Run,id)
     if not r or r.owner!=user.id:raise HTTPException(404,'运行不存在')
-    return json.loads(r.result)
+    return run_payload(r,events_for(id))
 @app.get('/api/v1/runs/{id}/events')
 def run_events(id:str,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
     r=s.get(Run,id)
     if not r or r.owner!=user.id:raise HTTPException(404,'运行不存在')
+    try:cursor=int(request.headers.get('last-event-id','0') or 0)
+    except ValueError:cursor=0
+    events=events_for(id,max(0,cursor))
     async def stream():
-        if request.headers.get('last-event-id')!='1':yield 'id: 1\nevent: complete\ndata: '+r.result+'\n\n'
+        for event in events:
+            yield f'id: {event.seq}\nevent: {event.phase}\ndata: {event.detail}\n\n'
     return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache'})
