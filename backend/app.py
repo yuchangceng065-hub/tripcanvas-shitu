@@ -362,37 +362,53 @@ def locked_violations(before,after):
     for day in before.days:
         for a in day.activities:
             if a.lock=='none':continue
-            b=next((x for d in after.days for x in d.activities if x.id==a.id),None)
+            match=next(((d,x) for d in after.days for x in d.activities if x.id==a.id),None)
+            b=match[1] if match else None
             if not b or b.placeId!=a.placeId or b.lock!=a.lock:problems.append((a.id,'锁定或必须保留的地点不能移除或替换'))
-            elif a.lock=='fixed' and (b.fixedStart!=a.fixedStart or b.duration!=a.duration):problems.append((a.id,'固定安排的时间与停留时长不能修改'))
+            elif a.lock=='fixed' and (match[0].date!=day.date or b.fixedStart!=a.fixedStart or b.duration!=a.duration):problems.append((a.id,'固定安排的日期、时间与停留时长不能修改'))
     return problems
+
+@app.post('/api/v1/planner/preview')
+async def preview(data:TripBody,request:Request,user:User=Depends(current_user)):
+    """Recheck a temporary draft without writing a trip or version."""
+    throttle('preview:'+user.id,15)
+    routes={}
+    for i,day in enumerate(data.trip.days):
+        if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(data.trip,day))
+    return {'trip':snapshot(data.trip),'routes':routes,'issues':evaluate(data.trip,routes,POIS)}
 
 @app.post('/api/v1/planner/confirm')
 async def confirm(data:ConfirmBody,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
     """Authoritative save: roads and hard constraints are re-checked server-side."""
     throttle('confirm:'+user.id,10)
-    trip=data.trip;target=data.baseRevision+1;row=s.get(TripRow,trip.id)
+    trip=data.trip;target=data.baseRevision+1
+    if trip.revision not in (data.baseRevision,target):raise HTTPException(409,'草案版本与确认基准不一致，请重新生成')
+    candidate=trip.model_copy(update={'revision':target})
+    row=s.get(TripRow,trip.id)
     if row:
         if row.owner!=user.id:raise HTTPException(404,'旅行不存在')
         # A retry of the same confirmation returns the stored result instead of 409.
-        if row.revision==target and snapshot(Trip.model_validate_json(row.snapshot))==snapshot(trip):
-            return {'trip':snapshot(trip),'revision':target,'issues':[],'idempotent':True}
+        if row.revision==target and snapshot(Trip.model_validate_json(row.snapshot))==snapshot(candidate):
+            return {'trip':snapshot(candidate),'revision':target,'issues':[],'idempotent':True}
         if row.revision!=data.baseRevision:raise HTTPException(409,'旅行已被其他请求更新，请重新打开后再确认')
         before=Trip.model_validate_json(row.snapshot)
+        if before.requirements and before.requirements.returnBy is not None and (
+            not trip.requirements or trip.requirements.returnBy!=before.requirements.returnBy or
+            trip.requirements.destinationPlaceId!=before.requirements.destinationPlaceId or trip.days[-1].date!=before.days[-1].date):
+            raise HTTPException(422,detail={'code':'return_constraint_changed','issues':[{'code':'return_constraint_changed','severity':'error','message':'普通方案不能修改返程地点、日期或期限，请在行程设置中明确调整','options':[]}]})
         problems=locked_violations(before,trip)
         if problems:
             raise HTTPException(422,detail={'code':'locked_violation','issues':[
                 {'code':'locked_violation','severity':'error','day':None,'activityId':pid,'message':message,'options':[]} for pid,message in problems]})
     elif data.baseRevision!=0:
         raise HTTPException(409,'草案基准版本已失效，请重新生成')
-    candidate=trip.model_copy(update={'revision':target})
     routes={}
     for i,day in enumerate(candidate.days):
         if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(candidate,day))
     found=evaluate(candidate,routes,POIS)
     hard=[issue for issue in found if issue['severity']=='error']
     source='amap' if amap_enabled() else 'osrm'
-    if hard:raise HTTPException(422,detail={'code':'infeasible','issues':found,'route_source':source})
+    if hard:raise HTTPException(422,detail={'code':'infeasible','issues':found,'routes':routes,'route_source':source})
     revision=persist_trip(s,user,candidate)
     return {'trip':snapshot(candidate),'revision':revision,'issues':found,'route_source':source,'idempotent':False}
 @app.post('/api/v1/trips/{id}/shares')
@@ -590,7 +606,11 @@ async def parse_requirements(data:RequestBody,request:Request,user:User=Depends(
     throttle('parse:'+user.id,6)
     parsed=parse_request(data.text)
     searcher=request.app.state.amap if amap_enabled() else request.app.state.search
-    for mention in parsed['mentions'][:4]:
+    for mention in parsed['mentions']:mention['candidates']=[]
+    # Keep the bounded search budget, but prioritize origin/return constraints.
+    ordered=sorted(parsed['mentions'],key=lambda mention:mention['role']=='visit')
+    if len(ordered)>4:parsed['notes'].append('本次最多搜索四个地点，优先查找起终点；其余地点请稍后手动搜索或跳过。')
+    for mention in ordered[:4]:
         try:found=[remember_place(place) for place in await searcher.search(mention['text'])]
         except HTTPException as error:
             found=[];mention['error']=error.detail if isinstance(error.detail,str) else '地点搜索暂时不可用'

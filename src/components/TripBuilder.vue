@@ -2,9 +2,11 @@
 import {ref,computed,watch} from 'vue'
 import {Check,ArrowRight,ArrowLeft,LoaderCircle,Trash2,MapPin,AlertTriangle,Sparkles} from '@lucide/vue'
 import PlacePicker from './PlacePicker.vue'
-import {clone,places,placeById,registerPlaces,time,type Requirements,type Trip,type Place} from '../domain'
+import {clone,places,placeById,registerPlaces,time,schedule,type Requirements,type Trip,type Place} from '../domain'
 import {api,confirmTrip} from '../api'
 import {walkingKm,type RoadRoute} from '../routes'
+import {ApiError} from '../apiError'
+import {candidateSelection,mentionKey} from '../candidateSelection'
 const props=defineProps<{loggedIn:boolean;hasModel:boolean}>()
 const emit=defineEmits<{created:[trip:Trip];login:[]}>()
 type Role='visit'|'destination'|'origin'
@@ -12,9 +14,11 @@ interface Mention {text:string;role:Role;candidates:Place[];error?:string}
 interface Parsed {requirements:Partial<Requirements>;evidence:Record<string,unknown>;missing:string[];mentions:Mention[];suggestions:Place[];notes:string[];search_source:string}
 const step=ref(0),intent=ref(''),title=ref('我的杭州慢游'),error=ref(''),busy=ref(false),parsing=ref(false),useModel=ref(props.hasModel)
 const req=ref<Requirements>({city:'杭州',startDate:'',days:2,people:2,mode:'walk',start:570,end:1110,pace:'balanced',interests:[],originPlaceId:null,destinationPlaceId:null,returnBy:null,walkBudgetKm:null})
-const candidateIds=ref<string[]>([])
+const manualIds=ref<string[]>([])
 const parsed=ref<Parsed|null>(null)
 const chosen=ref<Record<string,string>>({})
+const candidateIds=computed(()=>candidateSelection(manualIds.value,parsed.value?.mentions??[],chosen.value,[req.value.originPlaceId,req.value.destinationPlaceId]))
+const reviewRequired=ref(false),repairSummary=ref('')
 interface RepairOption {action:string;activityId?:string;minutes?:number;day?:number}
 interface DraftIssue {message:string;severity?:'error'|'warning';code?:string;options?:RepairOption[]}
 const draft=ref<{trip:Trip;source:string;issues:DraftIssue[];warnings:string[];routes?:Record<string,RoadRoute>}|null>(null)
@@ -23,7 +27,7 @@ const draftWarnings=computed(()=>draft.value?.issues.filter(issue=>issue.severit
 const valid=computed(()=>!!req.value.startDate&&req.value.days>=1&&req.value.days<=3&&req.value.start<req.value.end&&req.value.people>=1&&req.value.people<=10)
 const selected=computed(()=>candidateIds.value.map(id=>placeById(id)))
 const missing=computed(()=>parsed.value?.missing??[])
-const unidentified=computed(()=>(parsed.value?.mentions??[]).filter(m=>!chosen.value[m.text]))
+const unidentified=computed(()=>(parsed.value?.mentions??[]).filter(m=>!chosen.value[mentionKey(m)]))
 const evidence=computed(()=>{
  const e=parsed.value?.evidence??{}
  const labels:[string,boolean][]=[['日期',!!e.startDate],['天数',!!e.days],['人数',!!e.people],['交通',!!e.mode],['节奏',!!e.pace],['兴趣',Array.isArray(e.interests)&&e.interests.length>0],['返程时间',!!e.returnBy],['起终点',!!(e.origin||e.destination)]]
@@ -41,7 +45,8 @@ async function interpret(){
  try{
   const data:Parsed=await api('/planner/requirements','POST',{text})
   parsed.value=data
-  req.value={...req.value,...data.requirements}
+  chosen.value={}
+  req.value={...req.value,originPlaceId:null,destinationPlaceId:null,returnBy:null,...data.requirements}
   const found=[...data.mentions.flatMap(m=>m.candidates),...data.suggestions]
   registerPlaces(found)
   if(data.notes.length)error.value=data.notes.join('；')
@@ -49,16 +54,22 @@ async function interpret(){
  finally{parsing.value=false}
 }
 function resolve(mention:Mention,place:Place){
- chosen.value={...chosen.value,[mention.text]:place.id}
- if(mention.role==='destination'){req.value.destinationPlaceId=place.id;candidateIds.value=candidateIds.value.filter(id=>id!==place.id)}
- else if(mention.role==='origin'){req.value.originPlaceId=place.id;candidateIds.value=candidateIds.value.filter(id=>id!==place.id)}
- else if(!candidateIds.value.includes(place.id)&&candidateIds.value.length<18)candidateIds.value.push(place.id)
+ const key=mentionKey(mention)
+ if(mention.role==='visit'&&!chosen.value[key]&&candidateIds.value.length>=18){error.value='最多选择 18 个游览地点';return}
+ chosen.value={...chosen.value,[key]:place.id}
+ if(mention.role==='destination')req.value.destinationPlaceId=place.id
+ else if(mention.role==='origin')req.value.originPlaceId=place.id
  error.value=''
 }
-function choose(p:Place){if(candidateIds.value.length>=18){error.value='最多选择 18 个游览地点';return}if(!candidateIds.value.includes(p.id))candidateIds.value.push(p.id)}
+function choose(p:Place){if(candidateIds.value.length>=18&&!candidateIds.value.includes(p.id)){error.value='最多选择 18 个游览地点';return}manualIds.value=[...new Set([...manualIds.value,p.id])]}
+function removeCandidate(id:string){manualIds.value=manualIds.value.filter(value=>value!==id);for(const mention of parsed.value?.mentions??[])if(mention.role==='visit'&&chosen.value[mentionKey(mention)]===id)delete chosen.value[mentionKey(mention)]}
+function skipMention(mention:Mention){if(parsed.value)parsed.value.mentions=parsed.value.mentions.filter(m=>mentionKey(m)!==mentionKey(mention))}
+function draftEntries(day:number){if(!draft.value)return [];return schedule(draft.value.trip,day,draft.value.routes?.[String(day)])}
 function next(){
  error.value=''
  if(!valid.value){error.value='请确认具体日期、人数和每日时间范围';return}
+ if(unidentified.value.length){error.value='请先确认识别出的地点；不需要的地点可以点“跳过”';return}
+ if(parsed.value?.missing.includes('returnBy')&&req.value.returnBy==null){error.value='请确认返程具体时刻，不能省略尚有歧义的返程要求';return}
  const deadline=req.value.returnBy
  if(deadline!==null&&deadline!==undefined&&(!req.value.destinationPlaceId||deadline<req.value.start||deadline>req.value.end-15)){error.value='请确认返程地点和时间，至少预留 15 分钟';return}
  step.value=1
@@ -71,7 +82,7 @@ async function generate(){
   const walkBudgetKm=typeof req.value.walkBudgetKm==='number'&&req.value.walkBudgetKm>=0.5?req.value.walkBudgetKm:null
   const data=await api('/planner/draft','POST',{title:title.value,requirements:{...req.value,walkBudgetKm},candidateIds:candidateIds.value,useModel:useModel.value})
   registerPlaces(data.trip.placeSnapshots)
-  draft.value=data;step.value=2
+  draft.value=data;reviewRequired.value=false;repairSummary.value='';step.value=2
  }catch(e){error.value=(e as Error).message}
  finally{busy.value=false}
 }
@@ -88,9 +99,19 @@ function optionLabel(option:RepairOption){
  if(option.action==='drop')return `移除 ${placeName(option.activityId)}`
  return '重新生成草案'
 }
-function applyRepair(option:RepairOption){
+async function recheck(next:Trip){
+ if(!draft.value)return
+ busy.value=true;reviewRequired.value=true;error.value=''
+ try{
+  const result=await api('/planner/preview','POST',{trip:next})
+  registerPlaces(result.trip.placeSnapshots)
+  draft.value={...draft.value,...result};reviewRequired.value=false
+ }catch(e){error.value=(e as Error).message}
+ finally{busy.value=false}
+}
+async function applyRepair(option:RepairOption){
  if(!draft.value||busy.value)return
- if(option.action==='retry_route'){void generate();return}
+ if(option.action==='retry_route'){await recheck(draft.value.trip);return}
  const next=clone(draft.value.trip)
  if(option.action==='shorten'&&option.activityId){
   for(const day of next.days){const activity=day.activities.find(item=>item.id===option.activityId);if(activity){activity.duration=Math.max(15,activity.duration-(option.minutes||0));break}}
@@ -101,17 +122,25 @@ function applyRepair(option:RepairOption){
  } else if(option.action==='drop'&&option.activityId){
   for(const day of next.days){const index=day.activities.findIndex(item=>item.id===option.activityId&&item.lock==='none');if(index>=0){day.activities.splice(index,1);break}}
  }
- draft.value={...draft.value,trip:next,issues:[]}
- void save()
+ repairSummary.value=optionLabel(option)+'；正在重算，原旅行尚未保存。'
+ draft.value={...draft.value,trip:next,routes:undefined}
+ await recheck(next)
+ if(!reviewRequired.value)repairSummary.value=optionLabel(option)+'；已重算，请核对逐站时间与剩余问题，再确认保存。'
 }
 async function save(){
- if(!draft.value||draftErrors.value.length||busy.value)return
+ if(!draft.value||draftErrors.value.length||busy.value||reviewRequired.value)return
  busy.value=true;error.value=''
  try{
   const result=await confirmTrip(draft.value.trip,0)
   registerPlaces(result.trip.placeSnapshots)
   emit('created',result.trip)
- }catch(e){error.value=(e as Error).message}
+ }catch(e){
+  if(e instanceof ApiError&&e.detail&&typeof e.detail==='object'&&'issues' in e.detail){
+   const detail=e.detail as {issues:DraftIssue[];routes?:Record<string,RoadRoute>}
+   draft.value={...draft.value,issues:detail.issues,routes:detail.routes}
+  }
+  error.value=(e as Error).message
+ }
  finally{busy.value=false}
 }
 </script>
@@ -133,15 +162,16 @@ async function save(){
    <template v-if="parsed">
     <div class="evidence"><span v-for="[label,ok] in evidence" :key="label" :class="{missing:!ok}">{{ok?'已识别':'未提及'}} · {{label}}</span></div>
     <p v-if="missing.length" class="form-error"><AlertTriangle :size="13"/>还需要确认：{{missing.join('、')}}。下面可直接手动填写。</p>
-    <div v-for="mention in parsed.mentions" :key="mention.text" class="mention-card">
+    <div v-for="mention in parsed.mentions" :key="mentionKey(mention)" class="mention-card">
      <strong>{{mention.role==='destination'?'返程地点':mention.role==='origin'?'出发点':'想去'}}：{{mention.text}}</strong>
      <p v-if="mention.error" class="form-error">{{mention.error}}</p>
      <p v-else-if="!mention.candidates.length" class="form-hint">没有找到匹配的真实地点，请换用更具体的名称搜索。</p>
      <div v-else class="mention-options">
-      <button v-for="place in mention.candidates" :key="place.id" :class="{chosen:chosen[mention.text]===place.id}" @click="resolve(mention,place)" :aria-label="`确认${mention.text}为${place.name}`">
+      <button v-for="place in mention.candidates" :key="place.id" :class="{chosen:chosen[mentionKey(mention)]===place.id}" @click="resolve(mention,place)" :aria-label="`确认${mention.text}为${place.name}`">
        {{place.name}}<small>{{place.address}}</small>
       </button>
      </div>
+     <button v-if="mention.role!=='destination'" class="button quiet small" @click="skipMention(mention)">跳过这个地点</button>
     </div>
     <p v-if="unidentified.length" class="form-hint">未确认地点不会进入草案：{{unidentified.map(m=>m.text).join('、')}}。</p>
    </template>
@@ -179,7 +209,7 @@ async function save(){
    <div class="requirements-summary">{{req.startDate}} · {{req.days}} 天 · {{req.people}} 人 · {{req.mode==='walk'?'步行':'驾车'}} · {{time(req.start)}}—{{time(req.end)}}<span>{{req.interests.join(' / ')||'无特别偏好'}}{{req.walkBudgetKm?' · 步行预算 '+req.walkBudgetKm+' km':''}}{{req.returnBy!==null?' · 最晚 '+time(req.returnBy!)+' 到达':''}}</span></div>
    <div class="candidate-list">
     <strong>游览候选 · {{candidateIds.length}} 个</strong>
-    <p v-for="p in selected" :key="p.id"><MapPin :size="13"/><span>{{p.name}}</span><button @click="candidateIds=candidateIds.filter(id=>id!==p.id)" :aria-label="`移除候选${p.name}`"><Trash2 :size="13"/></button></p>
+    <p v-for="p in selected" :key="p.id"><MapPin :size="13"/><span>{{p.name}}</span><button @click="removeCandidate(p.id)" :aria-label="`移除候选${p.name}`"><Trash2 :size="13"/></button></p>
     <p v-if="!candidateIds.length" class="form-hint">还没有候选地点：先确认上方识别出的地点，或用下面的搜索添加。</p>
    </div>
    <p v-if="req.originPlaceId||req.destinationPlaceId" class="form-hint">起终点会独立添加，请从游览候选中移除同一地点。</p>
@@ -198,10 +228,12 @@ async function save(){
   </template>
 
   <template v-else-if="draft">
+   <p v-if="repairSummary" class="form-hint" role="status">{{repairSummary}}</p>
+   <p v-if="reviewRequired" class="form-error">修改后的道路和时间尚未核验，不能确认保存。<button class="button quiet small" @click="recheck(draft.trip)" :disabled="busy">重新核验当前草案</button></p>
    <p class="draft-source">{{draft.source==='model'?'模型生成 · 程序已校验道路':'规则草案 · 已校验道路用时'}}</p>
    <section v-for="(day,i) in draft.trip.days" :key="day.date" class="draft-day">
     <h3>Day {{i+1}} · {{day.date}}<small v-if="draftWalk(i)!==null">步行约 {{draftWalk(i)!.toFixed(1)}} km</small></h3>
-    <p v-for="a in day.activities" :key="a.id"><span>{{placeById(a.placeId).name}}</span><small>{{a.duration}} 分钟{{a.lock==='fixed'?' · 固定到达 '+time(a.fixedStart!):''}}</small></p>
+    <p v-for="entry in draftEntries(i)" :key="entry.activity.id"><span>{{entry.place.name}}</span><small>{{!reviewRequired?time(entry.start)+'—'+time(entry.end)+' · ':''}}{{entry.activity.duration}} 分钟{{entry.activity.lock==='fixed'?' · 固定到达 '+time(entry.activity.fixedStart!):''}}</small></p>
    </section>
    <div v-for="(issue,index) in draftErrors" :key="'error'+index" class="issue-repair">
     <p class="form-error"><AlertTriangle :size="13"/>{{issue.message}}</p>
@@ -214,7 +246,7 @@ async function save(){
    <p v-if="error" class="form-error" role="alert">{{error}}</p>
    <div class="modal-actions">
     <button class="button quiet" @click="step=1" :disabled="busy">返回调整</button>
-    <button class="button primary" @click="save" :disabled="busy||draftErrors.length>0"><LoaderCircle v-if="busy" class="spin" :size="15"/><Check v-else :size="16"/>{{busy?'正在复核并保存…':'确认并保存旅行'}}</button>
+    <button class="button primary" @click="save" :disabled="busy||reviewRequired||draftErrors.length>0"><LoaderCircle v-if="busy" class="spin" :size="15"/><Check v-else :size="16"/>{{busy?'正在核验…':'确认并保存旅行'}}</button>
    </div>
    <p v-if="draftErrors.length" class="form-hint">存在冲突时不会保存，请选择修复或调整条件后重新生成。</p>
   </template>

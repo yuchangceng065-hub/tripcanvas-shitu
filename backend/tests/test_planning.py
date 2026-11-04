@@ -25,7 +25,7 @@ def test_one_sentence_keeps_places_and_return_deadline():
     parsed=parse_request('2026-11-14 去杭州两天，两个人，想去西湖和浙工大，喜欢咖啡，少走路，第二天 17:00 前到杭州东站。')
     values=parsed['requirements']
     assert values['startDate']=='2026-11-14' and values['days']==2 and values['people']==2
-    assert values['mode']=='walk' and values['pace']=='relaxed' and values['interests']==['咖啡']
+    assert 'mode' not in values and values['pace']=='relaxed' and values['interests']==['咖啡']
     assert values['returnBy']==17*60
     assert [mention['text'] for mention in parsed['mentions']]==['西湖','浙江工业大学','杭州东站']
     assert [mention['role'] for mention in parsed['mentions']]==['visit','visit','destination']
@@ -54,3 +54,25 @@ def test_soft_pace_without_a_date_is_reported():
     assert parsed['requirements']['interests']==['咖啡']
     assert set(parsed['missing'])=={'startDate','days','people'}
     assert parsed['mentions']==[]
+
+@pytest.mark.parametrize('phrase,expected',[
+    ('下午5点',1020),('下午五点',1020),('晚上7点30分',1170),('上午9点',540),
+    ('中午12点',720),('凌晨12点',0),('17:00',1020),('17：30',1050),
+])
+def test_deadline_periods(phrase,expected):
+    parsed=parse_request(f'2026-11-14两天两个人，想去西湖，{phrase}前到杭州东站')
+    assert parsed['requirements']['returnBy']==expected
+    assert parsed['mentions'][-1]=={'text':'杭州东站','role':'destination'}
+
+def test_ambiguous_clock_requires_confirmation():
+    parsed=parse_request('2026-11-14两天两个人，5点前到杭州东站')
+    assert 'returnBy' not in parsed['requirements'] and 'returnBy' in parsed['missing']
+    assert parsed['notes']
+
+@pytest.mark.parametrize('text,mode',[('少走路',None),('不想走太多路',None),('自驾但少走路','drive'),('全程步行','walk'),('主要走路','walk')])
+def test_walking_preference_is_not_transport(text,mode):
+    assert parse_request(text)['requirements'].get('mode')==mode
+
+def test_aliases_deduplicate_after_normalization_but_keep_roles():
+    parsed=parse_request('想去浙工大和浙江工业大学，从浙江工业大学出发')
+    assert parsed['mentions']==[{'text':'浙江工业大学','role':'visit'},{'text':'浙江工业大学','role':'origin'}]

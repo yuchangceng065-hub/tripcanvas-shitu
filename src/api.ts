@@ -47,7 +47,7 @@ export async function api(path:string,method='GET',body?:unknown,signal?:AbortSi
  let d:any;try{d=await r.json()}catch{lastChecked=0;connection.status='offline';apiAvailable=false;throw new Error('云端服务暂不可用，请重新连接后重试')}
  // An HTTP error from a running API (for example model quota exhaustion) is
  // different from a network outage. Keep POI search, auth and routing usable.
- if(!r.ok){if(r.status===401)setToken('');throw new ApiError(r.status,apiErrorMessage(d.detail,r.status))}
+ if(!r.ok){if(r.status===401)setToken('');throw new ApiError(r.status,apiErrorMessage(d.detail,r.status),d.detail)}
  return d
 }
 export async function remoteSuggestion(trip:Trip,day:number,prompt:string):Promise<Proposal>{return api('/planner/suggest','POST',{trip,day,prompt})}

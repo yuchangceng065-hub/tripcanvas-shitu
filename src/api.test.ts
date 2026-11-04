@@ -39,3 +39,10 @@ it('网络中断与业务校验拒绝使用不同状态',async()=>{
  await expect(api('/places/search?q=灵隐寺')).rejects.toThrow('网络连接失败')
  expect(connection.status).toBe('offline')
 })
+
+it('规划拒绝保留结构化问题和选项，供连续修复',async()=>{
+ const detail={code:'infeasible',issues:[{code:'day_overflow',message:'仍有冲突',options:[{action:'depart_earlier',minutes:15,day:0}]}],routes:{}}
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(healthy()).mockResolvedValueOnce(new Response(JSON.stringify({detail}),{status:422})))
+ const {api}=await import('./api')
+ try{await api('/planner/confirm','POST',{});expect.unreachable()}catch(error){expect(error).toMatchObject({status:422,detail,message:'仍有冲突'})}
+})

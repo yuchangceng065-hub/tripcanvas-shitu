@@ -1,5 +1,6 @@
 """Confirmed requirements and candidate-only planning; no invented POIs."""
 from datetime import date,timedelta
+import math
 from typing import Literal
 from pydantic import BaseModel,ConfigDict,Field,model_validator
 
@@ -89,10 +90,21 @@ def _lunch_blocked(intervals):
 def evaluate(trip,routes,pois):
     """One authoritative hard-constraint pass. Unknown roads never count as feasible."""
     issues=[]
+    requirements=getattr(trip,'requirements',None)
+    if requirements and requirements.returnBy is not None:
+        final=trip.days[-1]
+        destination=next((a for a in final.activities if a.placeId==requirements.destinationPlaceId),None)
+        if destination is None:
+            issues.append({'code':'return_missing','severity':'error','day':len(trip.days)-1,'activityId':None,
+                'message':'末日缺少要求的返程地点，请加入并核验到达时间','options':[]})
+        elif final.activities[-1].id!=destination.id:
+            issues.append({'code':'return_not_final','severity':'error','day':len(trip.days)-1,'activityId':destination.id,
+                'message':'返程地点应为末日最后一站，请调整活动顺序','options':[]})
     for index,day in enumerate(trip.days):
         route=(routes or {}).get(index)
         legs=route.get('legs') if isinstance(route,dict) else None
-        if len(day.activities)>1 and not legs:
+        if len(day.activities)>1 and (not legs or len(legs)!=len(day.activities)-1 or any(
+            not isinstance(leg.get('minutes'),(int,float)) or not math.isfinite(leg['minutes']) or leg['minutes']<0 for leg in legs)):
             issues.append({'code':'route_missing','severity':'error','day':index,'activityId':None,
                 'message':f'第 {index+1} 天缺少真实道路路线，无法确认可行','options':[{'action':'retry_route','day':index}]})
             continue
@@ -100,15 +112,17 @@ def evaluate(trip,routes,pois):
         for position,activity in enumerate(day.activities):
             minutes=legs[position-1].get('minutes',0) if legs and position else 0
             earliest=end+minutes
-            start=activity.fixedStart if activity.lock=='fixed' and activity.fixedStart is not None else earliest
+            fixed=activity.fixedStart if activity.lock=='fixed' else None
+            start=max(earliest,fixed) if fixed is not None else earliest
             end=start+activity.duration
+            if position:intervals.append((earliest-minutes,earliest))
             intervals.append((start,end))
-            if start<earliest:
-                late=earliest-start
+            if fixed is not None and fixed<earliest:
+                late=earliest-fixed
                 options=_shorten_options(day,position,late)
                 options.append({'action':'depart_earlier','day':index,'minutes':late})
                 issues.append({'code':'fixed_too_early','severity':'error','day':index,'activityId':activity.id,
-                    'message':f'第 {index+1} 天 {pois[activity.placeId]["name"]} 最早可在 {earliest//60:02d}:{earliest%60:02d} 到达，固定时间 {start//60:02d}:{start%60:02d} 早到 {late} 分钟',
+                    'message':f'第 {index+1} 天 {pois[activity.placeId]["name"]} 最早可在 {earliest//60:02d}:{earliest%60:02d} 到达，比固定时间 {fixed//60:02d}:{fixed%60:02d} 晚 {late} 分钟',
                     'options':options})
             if end>day.end:
                 over=end-day.end
@@ -131,7 +145,8 @@ def evaluate(trip,routes,pois):
             issues.append({'code':'meal_break','severity':'warning','day':index,'activityId':None,
                 'message':f'第 {index+1} 天 11:30—13:30 没有 40 分钟以上空档，用餐和休息可能被压缩','options':[]})
         if index==len(trip.days)-1 and requirements and requirements.returnBy is not None and day.activities:
-            last=day.activities[-1]
+            last=next((a for a in day.activities if a.placeId==requirements.destinationPlaceId),None)
+            if last is None:continue
             last_start=_activity_start(day,legs,last)
             if last_start>requirements.returnBy:
                 issues.append({'code':'return_deadline','severity':'error','day':index,'activityId':last.id,
@@ -157,7 +172,7 @@ def _activity_start(day,legs,activity):
     for position,item in enumerate(day.activities):
         minutes=legs[position-1].get('minutes',0) if legs and position else 0
         earliest=end+minutes
-        start=item.fixedStart if item.lock=='fixed' and item.fixedStart is not None else earliest
+        start=max(earliest,item.fixedStart) if item.lock=='fixed' and item.fixedStart is not None else earliest
         end=start+item.duration
         if item.id==activity.id:return start
     return end
