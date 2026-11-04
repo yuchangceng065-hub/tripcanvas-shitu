@@ -4,9 +4,9 @@ import {ApiError,apiErrorMessage} from './apiError'
 const deployedAPI=import.meta.env.PROD?'https://tripcanvas-api.onrender.com/api/v1':''
 const base=(import.meta.env.VITE_API_BASE || deployedAPI || '/api/v1').replace(/\/$/,'')
 export const backendConfigured=!!(import.meta.env.VITE_API_BASE||deployedAPI)
-export const connection=reactive({status:'idle' as 'idle'|'checking'|'waking'|'online'|'offline'|'local',attempt:0,model:false})
+export const connection=reactive({status:'idle' as 'idle'|'checking'|'waking'|'online'|'offline'|'local',attempt:0,model:false,routing:'osrm' as 'osrm'|'amap',map:'osm' as 'osm'|'amap'})
 export let apiAvailable=false
-interface Health {status:'ok';model:boolean;storage?:string}
+interface Health {status:'ok';model:boolean;storage?:string;routing?:'osrm'|'amap';map?:'osm'|'amap'}
 let healthPromise:Promise<Health|null>|undefined,lastHealth:Health|null=null,lastChecked=0
 const pause=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms))
 export function checkAPI(force=false):Promise<Health|null>{
@@ -21,7 +21,7 @@ export function checkAPI(force=false):Promise<Health|null>{
     const r=await fetch(base+'/health',{cache:'no-store',signal:AbortSignal.timeout(Math.max(1,Math.min(15000,deadline-Date.now())))})
     if(r.ok&&r.headers.get('content-type')?.includes('application/json')){
      const data=await r.json()
-     if(data.status==='ok'){apiAvailable=true;connection.status='online';connection.model=!!data.model;lastHealth=data;return data}
+     if(data.status==='ok'){apiAvailable=true;connection.status='online';connection.model=!!data.model;connection.routing=data.routing==='amap'?'amap':'osrm';connection.map=data.map==='amap'?'amap':'osm';lastHealth=data;return data}
     }
     // Invalid configuration / denied access should not look like a slow cold start.
     if([400,401,403,404].includes(r.status))break

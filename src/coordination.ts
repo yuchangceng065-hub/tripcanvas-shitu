@@ -12,7 +12,7 @@ function canonical(value:unknown):string {
  return JSON.stringify(value)
 }
 function sameTrip(a:Trip,b:Trip){
- const normalize=(t:Trip)=>{const copy=clone(t);delete copy.placeSnapshots;if(copy.requirements==null)delete copy.requirements;else for(const key of ['originPlaceId','destinationPlaceId','returnBy'] as const)if(copy.requirements[key]==null)delete copy.requirements[key];for(const day of copy.days)for(const activity of day.activities)if(activity.fixedStart==null)delete activity.fixedStart;return copy}
+ const normalize=(t:Trip)=>{const copy=clone(t);delete copy.placeSnapshots;if(copy.mobility==null)delete copy.mobility;if(copy.requirements==null)delete copy.requirements;else for(const key of ['originPlaceId','destinationPlaceId','returnBy'] as const)if(copy.requirements[key]==null)delete copy.requirements[key];for(const day of copy.days)for(const activity of day.activities)if(activity.fixedStart==null)delete activity.fixedStart;return copy}
  return canonical(normalize(a))===canonical(normalize(b))
 }
 interface Deadline {index:number;late:number;includeSelf:boolean}

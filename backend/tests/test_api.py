@@ -193,3 +193,23 @@ def test_provider_trial_notice_is_not_retried_as_invalid_json():
         parse_model_json('Sorry, to prevent abuse of free resources, accounts that have not been recharged can only try 10 times. You can increase the free quota after recharging; https://console.aihubmix.com/topup')
     assert caught.value.status_code==503
     assert '额度已用尽' in caught.value.detail
+
+def test_amap_request_budgets_are_persistent_and_atomic(client,monkeypatch):
+    from backend.app import reserve_amap_usage,ProviderUsage,SessionLocal,HTTPException
+    from sqlalchemy import select
+    monkeypatch.setenv('AMAP_LBS_MONTHLY_LIMIT','2');monkeypatch.setenv('AMAP_LBS_DAILY_LIMIT','1')
+    reserve_amap_usage('lbs')
+    with pytest.raises(HTTPException) as caught:reserve_amap_usage('lbs')
+    assert caught.value.status_code==429
+    with SessionLocal() as db:
+        counts=[row.count for row in db.scalars(select(ProviderUsage).where(ProviderUsage.key.like('amap:lbs:%')))]
+    assert counts==[1,1]  # monthly reservation rolls back when the daily budget fails
+    with pytest.raises(HTTPException):reserve_amap_usage('lbs')
+
+def test_map_config_never_exposes_private_keys_and_proxy_rejects_untrusted_requests(client,monkeypatch):
+    monkeypatch.setenv('AMAP_WEB_KEY','private-web-secret');monkeypatch.setenv('AMAP_JS_KEY','domain-bound-public-js');monkeypatch.setenv('AMAP_JS_SECURITY_CODE','private-security-code')
+    data=client.get('/api/v1/map/config');assert data.status_code==200
+    assert data.json()['jsKey']=='domain-bound-public-js'
+    assert 'private-web-secret' not in data.text and 'private-security-code' not in data.text
+    assert client.get('/_AMapService/v4/map/styles?key=domain-bound-public-js',headers={'Origin':'https://untrusted.invalid'}).status_code==403
+    assert client.get('/_AMapService/v5/direction/driving?key=domain-bound-public-js',headers={'Origin':'http://127.0.0.1:5173'}).status_code==404

@@ -2,17 +2,18 @@ import { reactive } from 'vue'
 import placeData from '../backend/places.json'
 import { matchesRoute, routeKey, type RoadRoute, type RouteMap } from './routes'
 export type Lock = 'none' | 'keep' | 'fixed'
-export interface Place {id:string;name:string;kind:string;tag:string;description:string;duration:number;cost:number;lng:number;lat:number;x:number;y:number;indoor:boolean;image:string;coordinateSource?:string;crs?:string;address?:string;provider?:string;retrievedAt?:number;costKnown?:boolean}
+export interface Place {id:string;name:string;kind:string;tag:string;description:string;duration:number;cost:number;lng:number;lat:number;x:number;y:number;indoor:boolean;image:string;coordinateSource?:string;crs?:string;address?:string;provider?:string;retrievedAt?:number;costKnown?:boolean;amapId?:string;entrance?:[number,number];exit?:[number,number];routingLocation?:[number,number]}
 export interface Activity {id:string;placeId:string;duration:number;lock:Lock;fixedStart?:number}
 export interface Day {date:string;start:number;end:number;activities:Activity[]}
 export interface Requirements {city:'杭州';startDate:string;days:number;people:number;mode:'walk'|'drive';start:number;end:number;pace:'relaxed'|'balanced'|'full';interests:string[];originPlaceId?:string|null;destinationPlaceId?:string|null;returnBy?:number|null}
-export interface Trip {id:string;title:string;city:string;people:number;mode:'walk'|'drive';days:Day[];revision:number;requirements?:Requirements|null;placeSnapshots?:Place[]}
+export interface Mobility {parkingByPlace:Record<string,string>;parkingMinutes:number}
+export interface Trip {id:string;title:string;city:string;people:number;mode:'walk'|'drive';days:Day[];revision:number;requirements?:Requirements|null;placeSnapshots?:Place[];mobility?:Mobility|null}
 export interface Entry {activity:Activity;place:Place;start:number;end:number;earliest:number;travel:number;distance:number;conflict:boolean}
 export interface Issue {id:string;message:string;severity:'error'|'info';day?:number}
 export const places:Place[] = reactive(placeData as Place[])
-export function registerPlaces(incoming:Place[]=[]){for(const p of incoming){if(!p||typeof p.id!=='string'||!p.id.startsWith('osm:')||!Number.isFinite(p.lng)||!Number.isFinite(p.lat)||p.crs!=='WGS84'||!p.name)continue;const index=places.findIndex(x=>x.id===p.id);if(index<0)places.push(p);else places[index]=p}try{localStorage.setItem('tripcanvas.places.v1',JSON.stringify(places.filter(p=>p.id.startsWith('osm:')).slice(-200)))}catch{}}
+export function registerPlaces(incoming:Place[]=[]){for(const p of incoming){if(!p||typeof p.id!=='string'||!p.id.startsWith('osm:')&&!p.id.startsWith('amap:')||!Number.isFinite(p.lng)||!Number.isFinite(p.lat)||(p.id.startsWith('amap:')?p.crs!=='GCJ02':p.crs!=='WGS84')||!p.name)continue;const index=places.findIndex(x=>x.id===p.id);if(index<0)places.push(p);else places[index]=p}try{localStorage.setItem('tripcanvas.places.v1',JSON.stringify(places.filter(p=>p.id.startsWith('osm:')||p.id.startsWith('amap:')).slice(-200)))}catch{}}
 try{registerPlaces(JSON.parse(localStorage.getItem('tripcanvas.places.v1')||'[]'))}catch{}
-export function capturePlaces(t:Trip){t.placeSnapshots=[...new Set(t.days.flatMap(d=>d.activities.map(a=>a.placeId)))].filter(id=>id.startsWith('osm:')).map(id=>placeById(id));return t}
+export function capturePlaces(t:Trip){t.placeSnapshots=[...new Set([...t.days.flatMap(d=>d.activities.map(a=>a.placeId)),...Object.values(t.mobility?.parkingByPlace||{})])].filter(id=>id.startsWith('osm:')||id.startsWith('amap:')).map(id=>placeById(id));return t}
 export const placeById=(id:string)=>places.find(p=>p.id===id)!
 export const clone=<T>(value:T):T=>JSON.parse(JSON.stringify(value))
 export const uid=()=>crypto.randomUUID()
@@ -27,7 +28,7 @@ export function validate(trip:Trip,routes:RouteMap={}):Issue[]{const issues:Issu
 export function lockedChanges(before:Trip,after:Trip):string[]{const errors:string[]=[];before.days.forEach((d,di)=>d.activities.forEach(a=>{if(a.lock==='none')return;const next=after.days.flatMap(x=>x.activities).find(x=>x.id===a.id);if(!next||next.placeId!==a.placeId||next.lock!==a.lock)errors.push(`${placeById(a.placeId).name} 已锁定`);if(a.lock==='fixed'&&next&&(after.days[di]?.date!==d.date||!after.days[di]?.activities.some(x=>x.id===a.id)||next.fixedStart!==a.fixedStart||next.duration!==a.duration))errors.push(`${placeById(a.placeId).name} 的固定安排不可修改`)}));return errors}
 export interface DepartureShift {day:number;delay:number;shiftFixed:boolean;extendEnd:boolean}
 export interface Coordination {day:number;basis:Trip;changes:string[];resolved:boolean;earlierStart?:number;warnings:string[]}
-export interface Proposal {id:string;baseRevision:number;trip:Trip;summary:string;changes:string[];source:'demo'|'model'|'schedule';departure?:DepartureShift;coordination?:Coordination;visit?:{day:number;placeId:string;query:string}}
+export interface Proposal {id:string;baseRevision:number;trip:Trip;summary:string;changes:string[];source:'demo'|'model'|'schedule';departure?:DepartureShift;coordination?:Coordination;visit?:{day:number;placeId:string;query:string};transport?:{day:number}}
 // Only these simple departure requests use arithmetic; mixed requests still go to the assistant.
 export function departureDelay(prompt:string):number|null {
  if(!/晚.*出发|出发.*晚|推迟.*出发|出发.*推迟|多睡/.test(prompt)||/不要|不想|别|室内|下雨|减少|删除|去掉|换成|增加|添加/.test(prompt))return null

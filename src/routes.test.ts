@@ -1,9 +1,9 @@
 import { describe,it,expect,vi,afterEach } from 'vitest'
 import { createRenderer,ref,nextTick } from 'vue'
 import { createTrip,clone,schedule,validate } from './domain'
-import { matchesRoute,routeKey,normalizeOSRM,useRoadRoutes,type RoadRoute } from './routes'
+import { matchesRoute,routeKey,normalizeOSRM,useRoadRoutes,validRoute,type RoadRoute } from './routes'
 import { api } from './api'
-vi.mock('./api',()=>({apiAvailable:true,backendConfigured:true,checkAPI:vi.fn(async()=>({status:'ok'})),api:vi.fn()}))
+vi.mock('./api',()=>({connection:{routing:'osrm',map:'osm'},apiAvailable:true,backendConfigured:true,checkAPI:vi.fn(async()=>({status:'ok'})),api:vi.fn()}))
 function road(ids:string[],minutes=20):RoadRoute{return {mode:'walk',placeIds:ids,source:'osrm',legs:ids.slice(1).map(()=>({minutes,distance:1.5})),geometry:{type:'LineString',coordinates:[[120.13,30.25],[120.14,30.26]]},waypoints:ids.map(()=>({location:[120.13,30.25],distance:0})),fetchedAt:Date.now(),cached:false}}
 afterEach(()=>{vi.useRealTimers();vi.clearAllMocks()})
 describe('真实道路排程',()=>{
@@ -23,4 +23,18 @@ describe('真实道路排程',()=>{
   first(road(t.value.days[0]!.activities.map(a=>a.placeId)));await vi.advanceTimersByTimeAsync(0)
   expect(state.state.value.status).toBe('ready');expect(state.state.value.route).toEqual(expected);expect(expected?.placeIds[0]).toBe('liulang');app.unmount()
  })
+})
+
+describe('高德混合交通与停车条件',()=>{
+ function mixed(t:ReturnType<typeof createTrip>):RoadRoute{
+  t.mode='drive';t.days[0]!.activities=t.days[0]!.activities.slice(0,2)
+  const r=road(t.days[0]!.activities.map(a=>a.placeId));r.mode='drive';r.source='amap';r.crs='GCJ02';r.locations=Object.fromEntries(r.placeIds.map(id=>[id,[120.14,30.26]]));r.accessConfirmed=false;r.parkingByPlace={};r.parkingMinutes=5
+  const park={id:'amap:parking-test',name:'测试停车场',provider:'amap',crs:'GCJ02',lng:120.14,lat:30.26} as any
+  r.accessPoints=r.placeIds.map(id=>({placeId:id,parking:park,confirmed:false}))
+  r.legs=[{distance:7.4,minutes:21,segments:[{mode:'walk',label:'回停车点',distance:.2,minutes:3,geometry:r.geometry,estimated:false},{mode:'drive',label:'驾车',distance:7,minutes:10,geometry:r.geometry,estimated:false},{mode:'walk',label:'进入景区',distance:.2,minutes:3,geometry:r.geometry,estimated:false},{mode:'transfer',label:'停车预留',distance:0,minutes:5,estimated:true}]}]
+  return r
+ }
+ it('完整转场用时进入时间轴，不能只计算驾车的10分钟',()=>{const t=createTrip(),r=mixed(t);expect(schedule(t,0,r)[1]!.travel).toBe(21)})
+ it('拒绝缺少步行路线、分段合计错误和坐标系缺失的结果',()=>{const t=createTrip(),r=mixed(t);expect(validRoute(r,'drive',r.placeIds)).toBe(true);r.legs[0]!.minutes=10;expect(validRoute(r,'drive',r.placeIds)).toBe(false);r.legs[0]!.minutes=21;delete r.crs;expect(validRoute(r,'drive',r.placeIds)).toBe(false)})
+ it('改变停车点或停车预留后，旧路线失效并生成不同缓存键',()=>{const t=createTrip(),r=mixed(t),key=routeKey(t,0);t.mobility={parkingByPlace:{quyuan:'amap:another-parking'},parkingMinutes:10};expect(routeKey(t,0)).not.toBe(key);expect(matchesRoute(t,0,r)).toBe(false)})
 })

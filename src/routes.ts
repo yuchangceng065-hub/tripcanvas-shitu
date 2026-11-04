@@ -1,33 +1,47 @@
 import { ref, watch, onUnmounted, type Ref } from 'vue'
-import { api, apiAvailable, checkAPI, backendConfigured } from './api'
-import { placeById, type Trip } from './domain'
+import { api, apiAvailable, checkAPI, backendConfigured, connection } from './api'
+import { placeById, type Trip, type Mobility } from './domain'
 
+export interface TransportSegment {
+ mode:'walk'|'drive'|'transfer';label:string;distance:number;minutes:number;estimated:boolean
+ geometry?:{type:'LineString';coordinates:[number,number][]};traffic?:string[]
+}
 export interface RoadRoute {
-  mode: Trip['mode']; placeIds: string[]; source: 'osrm'
-  legs: {distance: number; minutes: number}[]
-  geometry: {type: 'LineString'; coordinates: [number, number][]}
-  waypoints: {location: [number, number]; distance: number}[]
-  fetchedAt: number; cached: boolean
+ mode:Trip['mode'];placeIds:string[];source:'osrm'|'amap';crs?:'GCJ02'
+ legs:{distance:number;minutes:number;segments?:TransportSegment[]}[]
+ geometry:{type:'LineString';coordinates:[number,number][]}
+ waypoints:{location:[number,number];distance:number}[]
+ locations?:Record<string,[number,number]>
+ accessPoints?:{placeId:string;parking:import('./domain').Place;confirmed:boolean}[]
+ accessConfirmed?:boolean;parkingByPlace?:Record<string,string>;parkingMinutes?:number;warnings?:string[]
+ fetchedAt:number;expiresAt?:number;cached:boolean
 }
 export type RouteState = {status: 'loading'|'ready'|'error'|'empty'; route?: RoadRoute; error?: string}
 export type RouteMap = Record<string, RoadRoute>
 const ttl = 24 * 60 * 60 * 1000
+export function parkingKey(mobility?:Mobility|null){return JSON.stringify([Object.entries(mobility?.parkingByPlace||{}).sort(([a],[b])=>a.localeCompare(b)),mobility?.parkingMinutes??5])}
 export function routeKey(trip: Trip, day: number) {
-  return trip.mode + ':' + (trip.days[day]?.activities.map(a => {const p=placeById(a.placeId);return `${a.placeId}@${p.lng},${p.lat}`}).join(';') || '')
+  return (connection.routing||'osrm')+':v4:'+parkingKey(trip.mobility)+':'+trip.mode + ':' + (trip.days[day]?.activities.map(a => {const p=placeById(a.placeId);return `${a.placeId}@${p.lng},${p.lat}`}).join(';') || '')
 }
 export function matchesRoute(trip: Trip, day: number, route?: RoadRoute) {
-  return !!route && route.mode === trip.mode && route.placeIds.join(',') === trip.days[day]?.activities.map(a => a.placeId).join(',') && route.legs.length === Math.max(0, route.placeIds.length - 1)
+  return !!route && (route.source!=='amap'||parkingKey({parkingByPlace:route.parkingByPlace||{},parkingMinutes:route.parkingMinutes??5})===parkingKey(trip.mobility)) && route.mode === trip.mode && route.placeIds.join(',') === trip.days[day]?.activities.map(a => a.placeId).join(',') && route.legs.length === Math.max(0, route.placeIds.length - 1)
 }
 function coordinate(p: unknown): p is [number, number] {
   return Array.isArray(p) && p.length === 2 && p.every(Number.isFinite) && Math.abs(p[0]) <= 180 && Math.abs(p[1]) <= 90
 }
 function measurement(x: unknown): x is number {return typeof x === 'number' && Number.isFinite(x) && x >= 0}
 export function validRoute(r: RoadRoute, mode: Trip['mode'], ids: string[]) {
-  return r?.source === 'osrm' && r.mode === mode && Array.isArray(r.placeIds) && r.placeIds.join(',') === ids.join(',') &&
+  return ['osrm','amap'].includes(r?.source) && (r.source!=='amap'||validMixedRoute(r,ids)) && r.mode === mode && Array.isArray(r.placeIds) && r.placeIds.join(',') === ids.join(',') &&
     Array.isArray(r.legs) && r.legs.length === ids.length - 1 && r.legs.every(l => measurement(l.distance) && measurement(l.minutes)) &&
     r.geometry?.type === 'LineString' && Array.isArray(r.geometry.coordinates) && r.geometry.coordinates.length >= 2 && r.geometry.coordinates.every(coordinate) &&
     Array.isArray(r.waypoints) && r.waypoints.length === ids.length && r.waypoints.every(w => coordinate(w.location) && measurement(w.distance)) && measurement(r.fetchedAt)
 }
+function validMixedRoute(r:RoadRoute,ids:string[]){
+ if(r.crs!=='GCJ02'||!r.locations||!ids.every(id=>coordinate(r.locations![id]))||typeof r.accessConfirmed!=='boolean')return false
+ if(!r.legs?.every(leg=>Array.isArray(leg.segments)&&leg.segments.every(s=>['walk','drive','transfer'].includes(s.mode)&&measurement(s.distance)&&measurement(s.minutes)&&(s.mode==='transfer'||s.geometry?.type==='LineString'&&s.geometry.coordinates.length>=2&&s.geometry.coordinates.every(coordinate)))&&Math.abs(leg.segments.reduce((n,s)=>n+s.distance,0)-leg.distance)<.001&&leg.segments.reduce((n,s)=>n+s.minutes,0)===leg.minutes))return false
+ return Array.isArray(r.accessPoints)&&(r.mode==='walk'||[...new Set(ids)].every(id=>r.accessPoints!.some(a=>a.placeId===id&&a.parking?.provider==='amap'&&a.parking.crs==='GCJ02'&&coordinate([a.parking.lng,a.parking.lat]))))
+}
+function learnCoordinates(r:RoadRoute){if(r.source==='amap')for(const [id,location] of Object.entries(r.locations||{})){const p=placeById(id);if(p)p.routingLocation=location}}
 export function normalizeOSRM(data: any, mode: Trip['mode'], placeIds: string[]): RoadRoute {
   if (data?.code === 'NoRoute' || data?.code === 'NoSegment') throw new Error('这些地点之间暂无道路路线，请调整地点或交通方式')
   if (data?.code !== 'Ok' || !data.routes?.[0]) throw new Error('道路服务未返回有效路线')
@@ -43,15 +57,15 @@ const inFlight = new Map<string,Promise<RoadRoute>>()
 let publicQueue: Promise<unknown> = Promise.resolve(), publicNextAt = 0
 function cachedRoute(key: string, mode: Trip['mode'], ids: string[]) {
   let value = cache.get(key)
-  if (!value) try {value = JSON.parse(localStorage.getItem('tripcanvas.routes.v2.' + key) || 'null')} catch {}
-  if (value && validRoute(value,mode,ids) && Date.now() - value.fetchedAt < ttl) return {...value,cached:true}
+  if (!value) try {value = JSON.parse(localStorage.getItem('tripcanvas.routes.v4.' + key) || 'null')} catch {}
+  if (value && value.source===connection.routing && validRoute(value,mode,ids) && Date.now() < (value.expiresAt??value.fetchedAt+ttl)) return {...value,cached:true}
 }
-async function fetchRoute(mode: Trip['mode'], ids: string[], signal?: AbortSignal): Promise<RoadRoute> {
+async function fetchRoute(mode: Trip['mode'], ids: string[], mobility?:Mobility|null, signal?: AbortSignal): Promise<RoadRoute> {
   await checkAPI()
   signal?.throwIfAborted()
   // Configured production backends never silently fall back to a public provider.
   if (apiAvailable || backendConfigured) {
-    const value: RoadRoute = await api('/routes','POST',{mode,placeIds:ids},signal)
+    const value: RoadRoute = await api('/routes','POST',{mode,placeIds:ids,...(mobility||{})},signal)
     if (!validRoute(value,mode,ids)) throw new Error('后端返回的路线不完整')
     return value
   }
@@ -77,14 +91,14 @@ async function fetchRoute(mode: Trip['mode'], ids: string[], signal?: AbortSigna
 export async function loadRoute(trip: Trip, day: number, signal?: AbortSignal): Promise<RoadRoute> {
   const key = routeKey(trip,day), ids = trip.days[day]!.activities.map(a => a.placeId)
   const cached = cachedRoute(key,trip.mode,ids)
-  if (cached) return cached
+  if (cached) {learnCoordinates(cached);return cached}
   // Shared requests have no consumer-owned AbortController; stale responses are ignored by the watcher.
   if (inFlight.has(key)) return inFlight.get(key)!
-  const pending = fetchRoute(trip.mode,ids,signal).then(value => {
-    cache.set(key,value)
+  const pending = fetchRoute(trip.mode,ids,trip.mobility,signal).then(value => {
+    learnCoordinates(value);cache.set(key,value)
     try {
-      localStorage.setItem('tripcanvas.routes.v2.' + key,JSON.stringify(value))
-      const keys = Object.keys(localStorage).filter(k => k.startsWith('tripcanvas.routes.v2.'))
+      localStorage.setItem('tripcanvas.routes.v4.' + key,JSON.stringify(value))
+      const keys = Object.keys(localStorage).filter(k => k.startsWith('tripcanvas.routes.v4.'))
       for (const old of keys.slice(0,Math.max(0,keys.length - 32))) localStorage.removeItem(old)
     } catch {}
     return value
@@ -101,7 +115,7 @@ export function useRoadRoutes(trip: Ref<Trip>, activeDay: Ref<number>) {
     const snapshot = JSON.parse(JSON.stringify(trip.value)) as Trip, day = activeDay.value, key = routeKey(snapshot,day)
     if (snapshot.days[day]!.activities.length < 2) {state.value = {status:'empty'};return}
     const cached = cachedRoute(key,snapshot.mode,snapshot.days[day]!.activities.map(a => a.placeId))
-    if (cached) {routes.value[key] = cached;state.value = {status:'ready',route:cached};return}
+    if (cached) {learnCoordinates(cached);routes.value[key] = cached;state.value = {status:'ready',route:cached};return}
     delete routes.value[key]
     state.value = {status:'loading'}
     timer = setTimeout(async () => {
