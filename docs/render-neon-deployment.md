@@ -1,6 +1,6 @@
 # Render Free + Neon Free 部署
 
-目标：保留 Vue + FastAPI + PostgreSQL。Render 运行单实例 Python API，Neon 持久保存账号、会话、行程、版本和分享。当前文件是部署配置说明，不代表云端服务已经创建。
+目标：保留 Vue + FastAPI + PostgreSQL。Render 运行单实例 Python API，Neon 持久保存账号、会话、行程、版本和分享。实际服务已经创建，公开部署信息见 deployment.json。后端健康检查：https://tripcanvas-api.onrender.com/api/v1/health。真实 HTTPS 集成验证已通过。
 
 ## 免费资源
 

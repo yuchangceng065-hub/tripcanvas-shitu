@@ -20,6 +20,8 @@ class RouteBody(BaseModel):
     model_config = ConfigDict(extra='forbid')
     mode: Literal['walk', 'drive']
     placeIds: list[str] = Field(min_length=2, max_length=12)
+    parkingByPlace: dict[str,str] = Field(default_factory=dict,max_length=36)
+    parkingMinutes: int = Field(default=5,ge=0,le=30)
 
 
 def number(value):
@@ -70,6 +72,7 @@ class Router:
         self.queued = 0
 
     async def route(self, body: RouteBody):
+        if any(self.pois.get(id,{}).get('crs')=='GCJ02' for id in body.placeIds):raise HTTPException(422,'高德地点需要启用高德服务后算路，未使用其他坐标系替代')
         if any(id not in self.pois for id in body.placeIds):
             raise HTTPException(422, '包含未知地点')
         coordinates = ';'.join(f"{self.pois[id]['lng']},{self.pois[id]['lat']}" for id in body.placeIds)
