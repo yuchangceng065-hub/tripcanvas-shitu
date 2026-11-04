@@ -140,3 +140,9 @@ def test_model_edits_only_selected_day_and_preserves_saved_trip(client,monkeypat
     async def remove_locked(system,data):return {'summary':'错误删除','changes':[],'start':585,'activities':[]}
     monkeypatch.setattr(module,'model_json',remove_locked)
     assert client.post('/api/v1/planner/suggest',json={'trip':t,'day':0,'prompt':'保留锁定'}).status_code==422
+
+def test_late_fixed_activity_does_not_move_following_arrivals_backwards():
+    t=trip();t['days'][0].update(start=800,end=1000)
+    t['days'][0]['activities'].append({'id':'c','placeId':'museum','duration':60,'lock':'none'})
+    result=issues(Trip.model_validate(t),{0:{'legs':[{'minutes':10},{'minutes':10}]}})
+    assert {i['id'] for i in result}=={'b','c'}

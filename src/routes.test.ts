@@ -7,7 +7,7 @@ vi.mock('./api',()=>({apiAvailable:true,backendConfigured:true,checkAPI:vi.fn(as
 function road(ids:string[],minutes=20):RoadRoute{return {mode:'walk',placeIds:ids,source:'osrm',legs:ids.slice(1).map(()=>({minutes,distance:1.5})),geometry:{type:'LineString',coordinates:[[120.13,30.25],[120.14,30.26]]},waypoints:ids.map(()=>({location:[120.13,30.25],distance:0})),fetchedAt:Date.now(),cached:false}}
 afterEach(()=>{vi.useRealTimers();vi.clearAllMocks()})
 describe('真实道路排程',()=>{
- it('道路用时替换估算且仍保留固定午餐',()=>{const t=createTrip();const r=road(t.days[0]!.activities.map(a=>a.placeId),70);const entries=schedule(t,0,r);expect(entries[1]!.travel).toBe(70);expect(entries[2]!.start).toBe(780);expect(entries[2]!.conflict).toBe(true);expect(validate(t,{[routeKey(t,0)]:r}).some(e=>e.day===0)).toBe(true)})
+ it('道路用时替换估算且仍保留固定午餐',()=>{const t=createTrip();const r=road(t.days[0]!.activities.map(a=>a.placeId),70);const entries=schedule(t,0,r);expect(entries[1]!.travel).toBe(70);expect(entries[2]!.start).toBe(890);expect(entries[2]!.conflict).toBe(true);expect(validate(t,{[routeKey(t,0)]:r}).some(e=>e.day===0)).toBe(true)})
  it('顺序或方式变化时不应用旧路线',()=>{const t=createTrip(),r=road(t.days[0]!.activities.map(a=>a.placeId));const changed=clone(t);changed.days[0]!.activities.reverse();expect(matchesRoute(changed,0,r)).toBe(false);changed.mode='drive';expect(matchesRoute(changed,0,r)).toBe(false)})
  it('拒绝错误路段数、负值和无路线响应',()=>{expect(()=>normalizeOSRM({code:'NoRoute'},'walk',['a','b'])).toThrow('暂无');expect(()=>normalizeOSRM({code:'Ok',routes:[{legs:[{distance:-1,duration:1}],geometry:{type:'LineString',coordinates:[[1,2],[3,4]]}}],waypoints:[]},'walk',['a','b'])).toThrow('不完整')})
  it('切换日期后的旧请求不会覆盖当前路线',async()=>{

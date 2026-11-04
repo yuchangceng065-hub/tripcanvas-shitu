@@ -193,9 +193,10 @@ def issues(t:Trip,routes=None):
             minutes=(routes[i]['legs'][j-1]['minutes'] if routes and i in routes else travel(POIS[d.activities[j-1].placeId],POIS[a.placeId],t.mode)) if j else 0
             earliest=end+minutes
             arrivals[(i,a.placeId)]=earliest
-            start=a.fixedStart if a.lock=='fixed' else earliest
+            fixed=a.fixedStart if a.lock=='fixed' else None
+            start=max(earliest,fixed if fixed is not None else earliest)
             end=start+a.duration
-            if start<earliest or end>d.end:result.append({'id':a.id,'message':f'第 {i+1} 天 {POIS[a.placeId]["name"]} 存在时间冲突','severity':'error'})
+            if (fixed is not None and earliest>fixed) or end>d.end:result.append({'id':a.id,'message':f'第 {i+1} 天 {POIS[a.placeId]["name"]} 存在时间冲突','severity':'error'})
     r=t.requirements
     if r and r.returnBy is not None:
         arrived=arrivals.get((len(t.days)-1,r.destinationPlaceId))
