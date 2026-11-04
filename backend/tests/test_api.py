@@ -351,3 +351,12 @@ def test_lunch_gap_warns_but_does_not_block_confirmation(client,monkeypatch):
     assert meals and meals[0]['severity']=='warning'
     confirmed=client.post('/api/v1/planner/confirm',json={'trip':data['trip'],'baseRevision':0})
     assert confirmed.status_code==200,confirmed.text
+
+def test_model_options_disable_hidden_thinking_for_glm_providers():
+    from backend.app import model_options
+    zai=model_options('https://api.z.ai/api/paas/v4','glm-5.1')
+    assert zai['thinking']=={'type':'disabled'}
+    assert model_options('https://api.z.ai/api/paas/v4','glm-4.7-flash')['thinking']=={'type':'disabled'}
+    assert 'thinking' not in model_options('https://api.z.ai/api/paas/v4','qwen3')
+    hub=model_options('https://aihubmix.com/v1','coding-glm-5.1-free')
+    assert hub['reasoning_effort']=='none' and hub['thinking']=={'type':'disabled'}

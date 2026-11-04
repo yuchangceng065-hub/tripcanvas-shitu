@@ -530,6 +530,14 @@ def parse_model_json(content,finish_reason=None):
     if not isinstance(value,dict):raise ValueError('模型需要返回 JSON 对象')
     return value
 
+def model_options(base,model):
+    """Provider switches that keep hidden reasoning from eating the JSON budget."""
+    name=model.lower()
+    options={'reasoning_effort':'none'} if base.startswith('https://aihubmix.com') else {}
+    if name in ('coding-glm-5.1-free','glm-5.1') or (base.startswith('https://api.z.ai') and (name.startswith('glm-5') or 'flash' in name)):
+        options['thinking']={'type':'disabled'}
+    return options
+
 async def model_json(system,data,*,validate=None):
     if os.getenv('PLANNER_MODE','auto')=='rules':raise HTTPException(503,'当前使用规则规划，真实 AI 已暂停。')
     key=os.getenv('MODEL_API_KEY');base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
@@ -539,11 +547,7 @@ async def model_json(system,data,*,validate=None):
         throttle('model-global',4)
         try:
             async with httpx.AsyncClient(timeout=65) as client:
-                options={'reasoning_effort':'none'} if base.startswith('https://aihubmix.com') else {}
-                # GLM-5.1 uses its own thinking switch; reasoning_effort alone
-                # can leave the output budget consumed by hidden reasoning.
-                if model.lower() in ('coding-glm-5.1-free','glm-5.1'):
-                    options['thinking']={'type':'disabled'}
+                options=model_options(base,model)
                 r=await client.post(base.rstrip('/')+'/chat/completions',headers={'Authorization':'Bearer '+key},json={'model':model,'messages':messages,'response_format':{'type':'json_object'},'temperature':.2,'max_tokens':4096,'stream':False,**options})
                 r.raise_for_status();choice=r.json()['choices'][0];content=choice['message']['content']
             output=parse_model_json(content,choice.get('finish_reason'))

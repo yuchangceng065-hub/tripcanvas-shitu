@@ -114,3 +114,14 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 自动化：前端 64 项、后端 53 项通过；构建通过。
 - 浏览器：`scripts/browser-check.mjs` 重跑通过；Day 2 路线底部显示“查询于 21:14 · 24 小时内有效”，布局未溢出。
 - 未做：线上高德驾车 5 分钟到期的真实浏览器复验（本地无高德密钥），只覆盖了单元测试与服务端缓存。
+
+### 模型接入准备（2026-11-04）
+
+- 现状：模型适配代码（chat/completions + JSON 校验 + 锁定保护 + 额度拒绝识别）已存在，线上 `PLANNER_MODE=rules`、`model:false`，没有可用密钥。
+- 可用性调研（2026-11-04）：
+  - Z.AI 官方定价：GLM-5.1 为 $1.4 输入 / $4.4 输出每百万 token；免费档是 GLM-4.7-Flash 与 GLM-4.5-Flash。
+  - OpenRouter 目录：`z-ai/glm-5.1` 为付费（$1.4 / $4.4），没有 `:free` 变体。
+  - AIHubMix `coding-glm-5.1-free`：本账号试用额度已用尽，需充值或新账号。
+- 代码：抽出 `model_options`，Z.AI 的 GLM-5 / Flash 默认关闭隐藏思考，避免输出预算被推理占满；新增 `scripts/model-check.py`（读取 `.env` 或环境变量，发一条最小 JSON 请求，不打印密钥）；`.env.example` 与 README 增加三家 provider 预设。
+- 测试：后端 54 项通过、前端 64 项、构建通过。
+- 未启用：需要用户提供密钥并设置 `PLANNER_MODE=auto`；线上未改配置、未重启、未产生任何模型调用费用。

@@ -68,7 +68,11 @@ python3 -m venv .venv
 环境变量见 `.env.example`，通过运行环境注入后端，密钥不得使用 `VITE_` 前缀。
 
 - 高德：`AMAP_WEB_KEY`、`AMAP_JS_KEY`、`AMAP_JS_SECURITY_CODE` 齐备且 `ROUTING_PROVIDER` 不为 `osrm` 时启用；`PUBLIC_API_ORIGIN` 为 API 的 HTTPS 地址，用于 JS 安全代理。
-- 模型：`MODEL_BASE_URL`、`MODEL_API_KEY`、`MODEL_NAME`，并要求 `PLANNER_MODE` 不为 `rules` 才会调用。当前线上为 `rules`。
+- 模型：OpenAI 兼容的 `MODEL_BASE_URL` + `MODEL_API_KEY` + `MODEL_NAME`，且 `PLANNER_MODE` 不为 `rules` 才会调用。当前线上为 `rules`。
+  - Z.AI：地址 `https://api.z.ai/api/paas/v4`；免费档可用 `glm-4.7-flash`，`glm-5.1` 是付费旗舰（官方价 $1.4 / $4.4 每百万输入 / 输出 token）。
+  - OpenRouter：地址 `https://openrouter.ai/api/v1`，模型 `z-ai/glm-5.1`（付费，没有 `:free` 变体）。
+  - AIHubMix：地址 `https://aihubmix.com/v1`，模型 `coding-glm-5.1-free`；本账号试用额度已用尽，需充值或新账号。
+  - 配置后先跑 `.venv/bin/python scripts/model-check.py` 验证密钥与 JSON 输出，再改 `PLANNER_MODE=auto`；密钥只放后端环境变量，不要提交。
 - 坐标：内置地点保存原始 WGS84；高德地点保存 GCJ-02。进入高德算路前用官方坐标转换接口转换，原始坐标保留。
 - 预算：`provider_usage` 表按日 / 月原子预留调用次数，默认 LBS 500/天、搜索 100/天、地图 500/天；达到预算返回 429，不自动升级付费。
 - 反代：`backend/start.py` 以单 worker 启动并信任平台代理头（`forwarded_allow_ips` 可覆盖），使限流键取到真实客户端 IP。
