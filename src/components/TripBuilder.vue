@@ -2,6 +2,7 @@
 import {ref,computed,watch} from 'vue'
 import {Check,ArrowRight,ArrowLeft,LoaderCircle,Trash2,MapPin,AlertTriangle,Sparkles} from '@lucide/vue'
 import PlacePicker from './PlacePicker.vue'
+import AgentTrace from './AgentTrace.vue'
 import PlanComparison from './PlanComparison.vue'
 import type {PlanComparison as Comparison} from '../planningOptions'
 import {clone,places,placeById,registerPlaces,time,schedule,type Requirements,type Trip,type Place} from '../domain'
@@ -14,7 +15,7 @@ const emit=defineEmits<{created:[trip:Trip];login:[]}>()
 type Role='visit'|'destination'|'origin'
 interface Mention {text:string;role:Role;candidates:Place[];error?:string}
 interface Parsed {requirements:Partial<Requirements>;evidence:Record<string,unknown>;missing:string[];mentions:Mention[];suggestions:Place[];notes:string[];search_source:string}
-const step=ref(0),intent=ref(''),title=ref('我的杭州慢游'),error=ref(''),busy=ref(false),parsing=ref(false),useModel=ref(props.hasModel)
+const step=ref(0),intent=ref(''),title=ref('我的杭州慢游'),error=ref(''),busy=ref(false),parsing=ref(false),useModel=ref(props.hasModel),agentOpen=ref(false)
 const req=ref<Requirements>({city:'杭州',startDate:'',days:2,people:2,mode:'walk',start:570,end:1110,pace:'balanced',interests:[],originPlaceId:null,destinationPlaceId:null,returnBy:null,walkBudgetKm:null})
 const manualIds=ref<string[]>([])
 const parsed=ref<Parsed|null>(null)
@@ -246,6 +247,8 @@ async function save(){
     <p class="form-hint">按兴趣补充的候选（可跳过）：</p>
     <div class="suggestion-list"><button v-for="p in parsed.suggestions" :key="p.id" :disabled="candidateIds.includes(p.id)" @click="choose(p)">{{candidateIds.includes(p.id)?'已选':'+ '}}{{p.name}}</button></div>
    </template>
+   <div class="agent-entry"><button type="button" class="button quiet small" @click="agentOpen=!agentOpen">{{agentOpen?'收起 Agent 实验':'用 Agent 规划（实验）'}}</button><span class="form-hint">模型多步调用路线/校验工具；方案仍需确认才保存。</span></div>
+   <AgentTrace v-if="agentOpen" :title="title" :requirements="req" :candidate-ids="candidateIds" :optional-ids="[]" :logged-in="loggedIn" @created="t=>emit('created',t)"/>
    <label class="model-choice"><input type="checkbox" v-model="useModel" :disabled="!hasModel"/>{{hasModel?'使用模型分配日期和顺序':'当前为规则规划，将使用地理邻近草案'}}</label>
    <p class="form-hint">{{useModel?'将把确认的需求和候选地点发给模型，随后程序核验地点和道路用时。':'规则草案使用确认的地点和道路估时，不代表 AI 生成，也不保证全局最优。'}}</p>
    <p v-if="error" class="form-error" role="alert">{{error}}</p>

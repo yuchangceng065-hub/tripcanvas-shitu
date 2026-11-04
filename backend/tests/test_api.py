@@ -556,7 +556,7 @@ def test_draft_records_real_run_events(client,monkeypatch):
     payload=client.get('/api/v1/runs/'+run_id).json()
     phases=[event['phase'] for event in payload['events']]
     assert phases[0]=='requirements' and phases[-1]=='completed'
-    assert payload['status']=='completed' and payload['steps']>=3
+    assert payload['status']=='completed' and len(payload['events'])>=3
     sse=client.get('/api/v1/runs/'+run_id+'/events')
     assert 'event: requirements' in sse.text and 'event: completed' in sse.text
     later=client.get('/api/v1/runs/'+run_id+'/events',headers={'Last-Event-ID':'2'})

@@ -249,3 +249,11 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 方案为 museum + quyuan 一日步行：1.663 km、交通 23 分钟、游览 180 分钟；`evaluate` 仅返回 `meal_break` 警告，无硬冲突；事件序列 model/tool_call/tool_result ×3 + completed。
 - 已知小问题：模型 summary 写“留有足够用餐休息时间”，但实际有 `meal_break` 警告；以方案 issues 为准，不采信模型自述。
 - 未确认前无旅行写入；QA 账号为一次性测试账号。CI 运行 41906442211，Postgres 41906450697，均通过。
+
+### 2026-11-05：Agent P1（后台运行 + 实时轨迹）
+
+- `POST /planner/agent` 现在立即返回 `{runId,status:running}`，循环在 `asyncio` 任务里执行；`/runs/{id}/events` 轮询数据库并向客户端流式输出，`Last-Event-ID` 续传，终端状态后关闭（最长 90 秒）。
+- 运行结果保留 `modelUsage`（后台任务内独立 ContextVar）；服务重启时把仍为 running 的运行标记为 interrupted。
+- 前端新增 `AgentTrace.vue`：启动运行、解析 SSE、逐条展示模型动作/工具调用/结果，完成后展示指标与“确认并保存 Agent 方案”；向导里可通过“用 Agent 规划（实验）”打开。
+- 测试：后端 127 项、前端 84 项（含 AgentTrace 组件与 SSE 解析）、Ruff、构建通过。
+- 未做：真实浏览器点选轨迹面板（jsdom 组件测试通过）；P2 的地点搜索/消歧。

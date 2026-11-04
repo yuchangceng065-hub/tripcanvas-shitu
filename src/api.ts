@@ -54,3 +54,37 @@ export async function api(path:string,method='GET',body?:unknown,signal?:AbortSi
 export async function remoteSuggestion(trip:Trip,day:number,prompt:string):Promise<Proposal>{return api('/planner/suggest','POST',{trip,day,prompt})}
 export interface Confirmed {trip:Trip;revision:number;issues:{code:string;message:string}[];idempotent:boolean}
 export function confirmTrip(trip:Trip,baseRevision:number):Promise<Confirmed>{return api('/planner/confirm','POST',{trip,baseRevision})}
+
+export interface AgentEvent {seq:number;phase:string;status:string;detail:Record<string,unknown>}
+export interface AgentStart {runId:string;status:string}
+export function startAgent(body:unknown):Promise<AgentStart>{return api('/planner/agent','POST',body)}
+export function parseSSEBlock(block:string):AgentEvent|null{
+ const lines=block.split(/\r?\n/);let seq=0,phase='',data=''
+ for(const line of lines){
+  if(line.startsWith('id:'))seq=Number(line.slice(3).trim())
+  else if(line.startsWith('event:'))phase=line.slice(6).trim()
+  else if(line.startsWith('data:'))data+=line.slice(5).trim()
+ }
+ if(!phase)return null
+ let detail:Record<string,unknown>={}
+ try{detail=JSON.parse(data||'{}')}catch{}
+ return {seq,phase,status:String(detail.status??'ok'),detail}
+}
+export async function streamRun(runId:string,onEvent:(event:AgentEvent)=>void,signal?:AbortSignal,cursor=0):Promise<void>{
+ const headers:Record<string,string>={}
+ if(token)headers.Authorization='Bearer '+token
+ if(cursor)headers['Last-Event-ID']=String(cursor)
+ const response=await fetch(base+'/runs/'+runId+'/events',{headers,credentials:'include',signal})
+ if(!response.ok||!response.body)throw new Error('无法读取运行轨迹')
+ const reader=response.body.getReader(),decoder=new TextDecoder();let buffer=''
+ while(true){
+  const {done,value}=await reader.read();if(done)break
+  buffer+=decoder.decode(value,{stream:true})
+  let index
+  while((index=buffer.indexOf('\n\n'))>=0){
+   const event=parseSSEBlock(buffer.slice(0,index));buffer=buffer.slice(index+2)
+   if(event)onEvent(event)
+  }
+ }
+ const tail=parseSSEBlock(buffer);if(tail)onEvent(tail)
+}

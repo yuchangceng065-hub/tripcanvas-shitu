@@ -13,10 +13,10 @@ class RunRecorder:
     def __init__(self, owner: str, trip_id: str, base_revision: int, kind: str):
         self.id = str(uuid.uuid4())
         self.seq = 0
+        self.result = {'kind': kind, 'status': 'running'}
         with SessionLocal.begin() as session:
             session.add(Run(id=self.id, owner=owner, trip_id=trip_id, base_revision=base_revision,
-                            result=json.dumps({'kind': kind, 'status': 'running'}, ensure_ascii=False),
-                            created=time.time()))
+                            result=json.dumps(self.result, ensure_ascii=False), created=time.time()))
 
     def event(self, phase: str, status: str = 'ok', detail: dict | None = None) -> int:
         self.seq += 1
@@ -25,14 +25,20 @@ class RunRecorder:
                                  detail=json.dumps(detail or {}, ensure_ascii=False)[:4000], created=time.time()))
         return self.seq
 
+    def finish(self, status: str, payload: dict | None = None) -> None:
+        self.event(status, detail={'steps': self.seq + 1})
+        self.result = {**(payload or {}), 'status': status}
+        self._store(self.result)
+
     def complete(self, payload: dict | None = None) -> None:
-        self.event('completed', detail={'steps': self.seq + 1})
-        self._store({**(payload or {}), 'status': 'completed', 'steps': self.seq})
+        self.finish('completed', payload)
 
     def fail(self, message: object) -> None:
-        text = str(message)[:300]
-        self.event('failed', status='error', detail={'message': text})
-        self._store({'status': 'failed', 'error': text, 'steps': self.seq})
+        self.finish('failed', {'error': str(message)[:300]})
+
+    def patch(self, extra: dict) -> None:
+        self.result = {**self.result, **extra}
+        self._store(self.result)
 
     def _store(self, value: dict) -> None:
         with SessionLocal.begin() as session:

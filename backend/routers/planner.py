@@ -1,4 +1,4 @@
-import os,uuid
+import asyncio,json,os,time,uuid
 from fastapi import APIRouter,Depends,HTTPException,Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -10,7 +10,8 @@ from backend.requirements import parse_request
 from backend.app import (amap_enabled,current_user,db,draft_order,locked_violations,
     model_api_key,model_json,persist_trip,remember_place,reserve_user_daily,route_body,
     snapshot,throttle,verify_proposal)
-from backend.db import Run,TripRow,User
+from backend.db import Run,SessionLocal,TripRow,User
+from backend.model_metrics import current_metrics,empty_metrics
 from backend.runlog import RunRecorder,events_for,run_payload
 from backend.schemas import ConfirmBody,DayEdit,ModelResult,RequestBody,SuggestionBody,Trip,TripBody
 router=APIRouter()
@@ -119,19 +120,31 @@ async def alternatives(data:AlternativesBody,request:Request,user:User=Depends(c
 
 @router.post('/api/v1/planner/agent')
 async def agent_plan(data:AlternativesBody,request:Request,user:User=Depends(current_user)):
-    """Bounded tool-calling agent over already confirmed candidates."""
+    """Start a bounded tool-calling run; progress streams from /runs/{id}/events."""
     throttle('agent:'+user.id,2)
     if request.app.state.alternatives_lock.locked():raise HTTPException(429,'正在核验其他方案，请稍后重试')
     reserve_user_daily(user.id,'agent',int(os.getenv('PLAN_AGENT_DAILY_LIMIT','6')))
     if len(data.candidateIds)>data.requirements.days*8:raise HTTPException(422,'候选过多，请减少地点或增加旅行天数')
+    if os.getenv('PLANNER_MODE','auto')=='rules' or not model_api_key() or not os.getenv('MODEL_BASE_URL') or not os.getenv('MODEL_NAME'):
+        raise HTTPException(503,'尚未配置模型服务，Agent 不可用；规则草案仍可使用。')
     recorder=RunRecorder(user.id,'',0,'agent')
-    try:
-        async with request.app.state.alternatives_lock:
-            result=await run_agent(data,request,recorder)
-            result['modelUsage']=request.state.model_metrics
-            return result
-    except Exception as error:
-        recorder.fail(getattr(error,'detail',error));raise
+    metrics=empty_metrics();state=request.app.state
+    async def work():
+        token=current_metrics.set(metrics)
+        try:
+            async with state.alternatives_lock:
+                await run_agent(data,state.router,recorder)
+        except HTTPException as error:
+            recorder.fail(error.detail)
+        except Exception as error:
+            recorder.fail(error)
+        finally:
+            recorder.patch({'modelUsage':metrics})
+            current_metrics.reset(token)
+    task=asyncio.create_task(work())
+    state.agent_tasks[recorder.id]=task
+    task.add_done_callback(lambda _:state.agent_tasks.pop(recorder.id,None))
+    return {'runId':recorder.id,'status':'running'}
 
 @router.post('/api/v1/planner/draft')
 async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
@@ -187,13 +200,22 @@ def get_run(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
     return run_payload(r,events_for(id))
 
 @router.get('/api/v1/runs/{id}/events')
-def run_events(id:str,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
+async def run_events(id:str,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
     r=s.get(Run,id)
     if not r or r.owner!=user.id:raise HTTPException(404,'运行不存在')
     try:cursor=int(request.headers.get('last-event-id','0') or 0)
     except ValueError:cursor=0
-    events=events_for(id,max(0,cursor))
     async def stream():
-        for event in events:
-            yield f'id: {event.seq}\nevent: {event.phase}\ndata: {event.detail}\n\n'
+        last=max(0,cursor);deadline=time.time()+90
+        while time.time()<deadline:
+            events=events_for(id,last)
+            for event in events:
+                last=event.seq
+                yield f'id: {event.seq}\nevent: {event.phase}\ndata: {event.detail}\n\n'
+            if not events:
+                with SessionLocal() as session:
+                    current=session.get(Run,id)
+                    status=json.loads(current.result).get('status') if current else None
+                if status not in ('running',None):break
+            await asyncio.sleep(.25)
     return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache'})

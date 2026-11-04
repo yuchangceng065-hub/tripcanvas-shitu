@@ -32,9 +32,9 @@ SYSTEM = '''你是杭州行程规划 Agent。每一步只输出一个 JSON 对�
 
 
 class Toolbox:
-    def __init__(self, data, request):
+    def __init__(self, data, router):
         self.data = data
-        self.request = request
+        self.router = router
         self.mode = data.requirements.mode
         self.routes = {}
 
@@ -48,7 +48,7 @@ class Toolbox:
     async def _route(self, ids):
         key = tuple(ids)
         if key not in self.routes:
-            self.routes[key] = await self.request.app.state.router.route(RouteBody(mode=self.mode, placeIds=list(ids)))
+            self.routes[key] = await self.router.route(RouteBody(mode=self.mode, placeIds=list(ids)))
         return self.routes[key]
 
     def _trip(self, days):
@@ -100,7 +100,7 @@ def _observation(value):
     return text[:3500]
 
 
-async def run_agent(data, request, recorder):
+async def run_agent(data, router, recorder):
     """Execute up to MAX_STEPS model decisions; returns the public result dict."""
     data.requirements.mustVisitIds = [id for id in data.candidateIds if id not in data.optionalIds]
     candidates = [{'id': id, 'name': POIS[id]['name'], 'kind': POIS[id].get('kind', '地点'),
@@ -110,7 +110,7 @@ async def run_agent(data, request, recorder):
         {'role': 'user', 'content': json.dumps({'requirements': data.requirements.model_dump(mode='json'),
                                                 'candidates': candidates, 'optionalIds': data.optionalIds}, ensure_ascii=False)},
     ]
-    toolbox = Toolbox(data, request)
+    toolbox = Toolbox(data, router)
     for step in range(1, MAX_STEPS + 1):
         try:
             decision = await model_json_messages(messages)
@@ -129,11 +129,12 @@ async def run_agent(data, request, recorder):
                          {'role': 'user', 'content': 'observation: ' + _observation({'ok': False, 'error': '未知动作，可用动作：' + ', '.join(ACTIONS)})}]
             continue
         if action == 'need_input':
-            recorder.event('need_input', detail={'step': step, 'question': str(args.get('question', ''))[:300]})
-            return {'runId': recorder.id, 'status': 'needs_input', 'question': str(args.get('question', ''))[:300]}
+            question = str(args.get('question', ''))[:300]
+            recorder.finish('needs_input', {'question': question})
+            return {'runId': recorder.id, 'status': 'needs_input', 'question': question}
         if action == 'give_up':
             reason = str(args.get('reason', '未说明'))[:300]
-            recorder.fail('give_up: ' + reason)
+            recorder.finish('gave_up', {'message': reason})
             return {'runId': recorder.id, 'status': 'gave_up', 'message': reason}
         recorder.event('tool_call', detail={'step': step, 'tool': action, 'args': args})
         try:
@@ -149,11 +150,11 @@ async def run_agent(data, request, recorder):
             validation = {'trip': snapshot(trip), 'issues': issues, 'metrics': outcome['summary']['metrics'],
                           'summary': str(args.get('summary', ''))[:300]}
             recorder.event('tool_result', detail={'step': step, 'ok': True, 'summary': {'feasible': True}})
-            recorder.complete({'runId': recorder.id, 'status': 'completed', 'validation': validation})
-            return {'runId': recorder.id, 'status': 'completed', 'plan': validation,
-                    'modelUsage': getattr(request.state, 'model_metrics', None), 'steps': step}
+            recorder.complete({'runId': recorder.id, 'status': 'completed', 'validation': validation, 'modelSteps': step})
+            return {'runId': recorder.id, 'status': 'completed', 'plan': validation, 'steps': step}
         recorder.event('tool_result', detail={'step': step, 'ok': outcome['ok'], 'summary': outcome['summary']})
         messages += [{'role': 'assistant', 'content': _observation(decision)},
                      {'role': 'user', 'content': 'observation: ' + _observation({'ok': outcome['ok'], 'summary': outcome['summary']})}]
-    recorder.fail('超过最大步数仍未给出可行方案')
-    return {'runId': recorder.id, 'status': 'incomplete', 'message': f'超过 {MAX_STEPS} 步仍未给出可行方案'}
+    message = f'超过 {MAX_STEPS} 步仍未给出可行方案'
+    recorder.finish('incomplete', {'message': message})
+    return {'runId': recorder.id, 'status': 'incomplete', 'message': message}

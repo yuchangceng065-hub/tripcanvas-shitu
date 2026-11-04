@@ -7,7 +7,7 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from backend.routing import Router
 from backend.catalog import PlaceSearch
 from backend.amap import AmapService,RoutingGateway,enabled as amap_enabled
@@ -22,6 +22,7 @@ from backend.schemas import (Trip)
 @asynccontextmanager
 async def lifespan(app):
     app.state.alternatives_lock=asyncio.Lock()
+    app.state.agent_tasks={}
     for attempt in range(5):
         try:
             Base.metadata.create_all(engine)
@@ -29,6 +30,9 @@ async def lifespan(app):
         except OperationalError:
             if attempt==4:raise
             await asyncio.sleep(min(2**attempt,8))
+    with SessionLocal.begin() as session:
+        for run in session.scalars(select(Run).where(Run.result.like('%"status": "running"%'))):
+            session.execute(update(Run).where(Run.id==run.id).values(result=json.dumps({'kind':json.loads(run.result).get('kind'),'status':'interrupted','error':'服务重启，运行已中断'})))
     async with httpx.AsyncClient(timeout=20,headers={'User-Agent':'TripCanvas/1.1 (+https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site)'}) as client:
         with SessionLocal() as session:
             for row in session.scalars(select(PlaceRecord)):
