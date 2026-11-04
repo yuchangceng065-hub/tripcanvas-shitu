@@ -36,6 +36,15 @@ it('改选地点后，候选清单只包含最终校区',async()=>{
  const selected=host.querySelector('.candidate-list')!.textContent!
  expect(selected).toContain(place('baidi').name);expect(selected).not.toContain(place('quyuan').name)
 })
+it('有返程时间但未选终点时，时间输入仍可见且可以清空解除限制',async()=>{
+ apiMock.mockResolvedValue({...parsed(),mentions:[],requirements:{startDate:'2026-11-14',days:1,people:2,returnBy:1050}})
+ const text=host.querySelector('textarea')!;text.value='下午五点半前到站';text.dispatchEvent(new Event('input'));await nextTick();await click('识别需求')
+ await click('确认需求');expect(host.textContent).toContain('请确认返程地点和时间')
+ const label=[...host.querySelectorAll('label')].find(el=>el.textContent?.includes('末日最晚到达'))!
+ const timeInput=label.querySelector('input')!;expect(timeInput.value).toBe('17:30')
+ timeInput.value='';timeInput.dispatchEvent(new Event('change'));await nextTick();await click('确认需求')
+ expect(host.textContent).toContain('想去的地方');expect(host.querySelector('[role="alert"]')).toBeNull()
+})
 it('修复只预览，保留剩余问题，全部解决后仍需最终确认才保存',async()=>{
  await chooseAndGenerate([issue()])
  apiMock.mockResolvedValueOnce({trip:trip(),routes:{},issues:[issue('extend_day','还有第二个冲突')]})

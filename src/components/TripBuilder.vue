@@ -226,7 +226,8 @@ async function save(){
     <label>首日起点（可选）<select v-model="req.originPlaceId"><option :value="null">不指定</option><option v-for="p in places" :key="p.id" :value="p.id">{{p.name}}</option></select></label>
     <label>末日终点（可选）<select v-model="req.destinationPlaceId"><option :value="null">不指定</option><option v-for="p in places" :key="p.id" :value="p.id">{{p.name}}</option></select></label>
    </div>
-   <label v-if="req.destinationPlaceId">末日最晚到达（可选）<input type="time" :value="req.returnBy===null?'':time(req.returnBy!)" @change="updateTime($event,'returnBy')"/></label>
+   <label v-if="req.destinationPlaceId||req.returnBy!=null||parsed?.missing.includes('returnBy')">末日最晚到达（可选）<input type="time" :value="req.returnBy==null?'':time(req.returnBy)" @change="updateTime($event,'returnBy')"/></label>
+   <p v-if="!req.destinationPlaceId&&req.returnBy!=null" class="form-hint">已填写最晚到达时间，请选择终点；不需要返程限制时请清空时间。</p>
    <p v-if="error" class="form-error" role="alert">{{error}}</p>
    <button class="button primary full" @click="next">确认需求，选择地点<ArrowRight :size="16"/></button>
   </template>

@@ -16,6 +16,9 @@ def test_oracle_rejects_wrong_metrics_and_required_omissions_without_planner_val
  assert 'total_metric_mismatch' in audit_option(altered,task)
  altered=copy.deepcopy(option);altered['trip']['days'][0]['activities']=[]
  assert 'must_visit:quyuan' in audit_option(altered,task)
+ optional_task={**task,'optional':['quyuan']};altered=copy.deepcopy(option)
+ altered['trip']['days'][0]['activities']*=2
+ assert 'duplicate_visit:quyuan' in audit_option(altered,optional_task)
 
 def test_evaluation_cli_runs_fixed_suite_in_isolation(tmp_path):
  p=subprocess.run([sys.executable,'scripts/evaluate.py','--output-dir',str(tmp_path)],cwd=ROOT,capture_output=True,text=True)

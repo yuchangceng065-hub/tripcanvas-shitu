@@ -10,7 +10,7 @@
 - 线上 API：https://tripcanvas-api.onrender.com/api/v1 ，Render Free 单实例；数据库为 Neon Free PostgreSQL。健康检查返回 `plannerMode=model`、`model=true`、`map=amap`、`routing=amap`、`storage=postgresql`。
 - 线上已验收：注册登录、Bearer 会话、行程同步、版本记录、快照分享与撤销、高德地图与路线、地点搜索、停车接驳。
 - 规划模式：线上已启用 Groq Free Tier 的 `openai/gpt-oss-20b`，支持真实模型分日排序与局部修改；规则草案仍可单独选择。
-- 自动化：前端 76 项（含实际 Vue 组件交互）、后端 118 项测试通过，生产构建通过；最新修复记录见 `docs/verification.md`。
+- 自动化：前端 77 项（含实际 Vue 组件交互）、后端 118 项测试通过，生产构建通过；最新修复记录见 `docs/verification.md`。
 
 ## 当前实现
 
@@ -103,7 +103,7 @@ npm run build
 .venv/bin/python -m pytest backend/tests -q
 ```
 
-当前结果：前端 76 项、后端 118 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过。
+当前结果：前端 77 项、后端 118 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过。
 
 浏览器验收（需本地 API + Vite + Chrome 调试端口）：`node scripts/browser-check.mjs`，脚本会跑完“一句需求 → 地点确认 → 草案 → 确认保存”，并拒绝在非本地 API 上创建测试账号。测试覆盖锁定保护、仅修改指定日期、时间冲突与顺延协调、中文输入法 Enter、地点意图、道路结构校验、分享快照、撤销、用户隔离、版本幂等、高德响应与预算。
 

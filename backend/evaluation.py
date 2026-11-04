@@ -12,6 +12,8 @@ def audit_option(option,task,route_fixture=False):
     present=[a['placeId'] for d in t['days'] for a in d['activities']]
     for id in must:
         if present.count(id)!=1:errors.append('must_visit:'+id)
+    for id in candidates:
+        if present.count(id)>1:errors.append('duplicate_visit:'+id)
     if set(option['omittedIds'])!=candidates-set(present):errors.append('omissions_not_exact')
     if not set(option['omittedIds'])<=set(task.get('optional',[])):errors.append('required_omitted')
     anchors={task.get('origin'),task.get('destination')}-{None}
