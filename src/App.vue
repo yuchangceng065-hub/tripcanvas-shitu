@@ -112,11 +112,10 @@ async function generate(text=prompt.value){
   let next:Proposal
   const delay=departureDelay(text)
   if(delay!==null)next=departureProposal(before,day,delay)
-  else if(user.value){
+  else if(user.value&&hasModel.value){
    const health=await checkAPI()
    if(!health)throw new Error('暂时无法连接云端，请重新连接后重试。地点搜索和需求会保留。')
-   if(!health.model)throw new Error('AI 模型尚未配置；你仍可搜索地点、加入行程和整体顺延。')
-   next=await remoteSuggestion(before,day,text)
+   next=health.model?await remoteSuggestion(before,day,text):suggest(before,day,text)
   }else next=suggest(before,day,text)
   for(let i=0;i<next.trip.days.length;i++){if(JSON.stringify(next.trip.days[i])===JSON.stringify(before.days[i]))continue;if(next.trip.days[i]!.activities.length>1){try{proposalRoutes.value[routeKey(next.trip,i)]=await loadRoute(next.trip,i)}catch(e){proposalRouteError.value='道路用时未核验：'+(e as Error).message}}}
   if(trip.value.id!==before.id||trip.value.revision!==before.revision||dayIndex.value!==day)throw new Error('生成期间行程发生变化，请重新调整')
@@ -181,7 +180,7 @@ async function logout(){try{await api('/auth/logout','POST')}catch{}setToken('')
 async function reconnect(){const info=await checkAPI(true);if(info){try{user.value=await api('/auth/me')}catch{user.value=null}notify('云端服务已连接')}}
 watch(()=>trip.value.id,()=>{dayIndex.value=0;proposal.value=null})
 watch(()=>entries.value.map(x=>x.activity.id).join(','),()=>{if(!entries.value.some(e=>e.activity.id===selected.value))selected.value=entries.value[0]?.activity.id||''})
-onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=await checkAPI();try{if(backend.value)user.value=await api('/auth/me')}catch{}if(location.hash.startsWith('#share=')){try{const shared=await api('/public/shares/'+encodeURIComponent(location.hash.slice(7)));registerPlaces(shared.placeSnapshots);shareTrip.value=shared}catch{notify('分享链接已失效，或无法连接后端服务')}}})
+onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';await checkAPI();try{if(backend.value)user.value=await api('/auth/me')}catch{}if(location.hash.startsWith('#share=')){try{const shared=await api('/public/shares/'+encodeURIComponent(location.hash.slice(7)));registerPlaces(shared.placeSnapshots);shareTrip.value=shared}catch{notify('分享链接已失效，或无法连接后端服务')}}})
 </script>
 <template>
  <div class="app-shell">
@@ -224,8 +223,8 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=
      <div class="map-route-note">{{routeReady?'道路时间不含实时交通、停车与进出景区。':'路线未核验，当前时间与里程仅为粗略估算。'}} <span v-if="entries.some(e=>e.place.costKnown===false)">部分地点费用未知，预算仅汇总已知金额。</span><span v-if="routeState.route?.waypoints.some(w=>w.distance>100)">虚线连接地点与附近道路。</span></div>
     </section>
     <aside class="assistant-panel" :class="{'mobile-show':tabMobile==='ai'}">
-     <div class="assistant-header"><span class="spark-icon"><Sparkles :size="19"/></span><div><h2>你的旅行搭子</h2><p>一起，把旅程调整到刚刚好。</p></div><span class="ai-badge">{{user?(hasModel?'AI 已连接':'路线助手'):'未登录'}}</span></div>
-     <div class="assistant-tools"><button type="button" :disabled="busy" @click="openModal('search')"><Plus :size="14"/>添加想去的地点</button><button v-if="!user" type="button" @click="openModal('account')">登录使用 AI<ArrowRight :size="12"/></button><span v-else>已登录 · {{hasModel?'AI 调整可用':'地点规划可用'}}</span></div>
+     <div class="assistant-header"><span class="spark-icon"><Sparkles :size="19"/></span><div><h2>你的旅行搭子</h2><p>一起，把旅程调整到刚刚好。</p></div><span class="ai-badge">{{hasModel&&user?'AI 已连接':'规则规划'}}</span></div>
+     <div class="assistant-tools"><button type="button" :disabled="busy" @click="openModal('search')"><Plus :size="14"/>添加想去的地点</button><button v-if="!user" type="button" @click="openModal('account')">登录同步<ArrowRight :size="12"/></button><span v-else>{{hasModel?'AI 调整可用':'地点搜索 · 自动排程'}}</span></div>
      <div ref="assistantScroll" class="assistant-scroll">
       <div class="assistant-intro"><span class="mini-eyebrow">HELLO, TRAVELER</span><h3>好旅行，<br>也需要一点留白。</h3><p>想晚点出发，还是多坐一会儿？<br>告诉我，我们一起调整。</p><div class="intro-art"><div class="sun-disc"/><div class="hill hill-back"/><div class="hill hill-front"/><div class="art-path"/><span class="tiny-tree">♧</span><div class="art-note">TAKE IT SLOW</div></div></div>
       <div class="suggestion-title">试试这样调整 <Sparkles :size="13"/></div>
@@ -235,7 +234,7 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=
       <div v-if="busy" class="assistant-message" role="status"><LoaderCircle :size="17" class="spin"/>{{busyText}}</div>
       <div v-if="response" class="assistant-message response" role="status"><Sparkles :size="16"/><p>{{response}}</p></div>
       <section v-if="visitSearch" class="visit-search-card" aria-label="确认想去的具体地点"><h3>选择具体地点，再规划。</h3><p>加入 Day {{visitSearch.day+1}}，核验路线并协调时间。选中的地点会设为必须保留。</p><form class="visit-refine" @submit.prevent="refineVisitSearch"><input v-model="visitLookupQuery" :readonly="busy" aria-label="地点或校区名称" maxlength="80"/><button type="submit" class="button quiet small" :disabled="busy||visitLookupQuery.trim().length<2">重新搜索</button></form><article v-for="p in visitSearch.places" :key="p.id"><strong>{{p.name}}</strong><p>{{p.address||p.tag}}</p><a v-if="p.coordinateSource" :href="p.coordinateSource" target="_blank" rel="noopener noreferrer">核对地图位置<ExternalLink :size="11"/></a><button class="button primary small full" :disabled="busy" :aria-label="`规划到${p.name}`" @click="chooseVisit(p.id)">选此地点并重新规划<ArrowRight :size="13"/></button></article><p v-if="!visitSearch.places.length">没有匹配结果，请输入完整地点或校区名称。</p><small>© OpenStreetMap contributors · Photon 真实地点搜索</small><button class="text-button full" @click="visitSearch=null;response=''" :disabled="busy">暂不添加</button></section>
-      <div v-if="proposal" class="proposal-card"><div class="proposal-head"><span>{{proposal.visit?'新地点路线预览':proposal.departure?'整体顺延预览':'调整预览'}}</span><small>{{proposal.source==='schedule'?'排程计算 · ':''}}Day {{dayIndex+1}}</small></div>
+      <div v-if="proposal" class="proposal-card"><div class="proposal-head"><span>{{proposal.visit?'新地点路线预览':proposal.departure?'整体顺延预览':proposal.source==='demo'?'规则调整预览':'AI 调整预览'}}</span><small>{{proposal.source==='schedule'?'排程计算 · ':''}}Day {{dayIndex+1}}</small></div>
        <div v-if="visitEntry" class="visit-confirmed"><strong>{{visitEntry.place.name}}</strong><span>Day {{proposal.visit!.day+1}} · {{time(visitEntry.start)}}—{{time(visitEntry.end)}} · 必须保留</span><small>已按{{proposal.trip.mode==='walk'?'步行':'驾车'}}道路路线规划；确认后更新画布。</small></div>
        <div v-if="proposal.departure" class="departure-options"><label v-if="canShiftFixed"><input type="checkbox" :disabled="busy" :checked="proposal.departure.shiftFixed" @change="changeDepartureOption($event,'shiftFixed')"/>固定游览安排也顺延</label><label><input type="checkbox" :disabled="busy" :checked="proposal.departure.extendEnd" @change="changeDepartureOption($event,'extendEnd')"/>允许当天结束时间延后</label><small>优先保留地点与顺序；必要时协调未锁定停留。勾选后先预览，返程期限保持。</small></div>
        <div v-if="proposal.coordination" class="coordination-note" :class="{unresolved:!proposal.coordination.resolved}"><strong>{{proposal.coordination.resolved?'已自动协调时间':'自动协调后仍有冲突'}}</strong><span>{{proposal.coordination.resolved?'已核验道路时间并保留锁定安排，具体变化如下。':'当前固定条件下尚未找到可行安排，可选择下方备选出发时间，或调整锁定条件。'}}</span><span v-for="warning in proposal.coordination.warnings" :key="warning">{{warning}}</span></div>
@@ -244,7 +243,7 @@ onMounted(async()=>{selected.value=entries.value[0]?.activity.id||'';const info=
        <div v-for="(issue,i) in proposalIssues" :key="`${issue.id}-${i}`" class="proposal-error"><AlertTriangle :size="14"/>{{issue.message}}</div><button v-if="proposal.coordination?.earlierStart!==undefined&&!proposal.coordination.resolved" class="button quiet full earlier-option" :disabled="busy" @click="useEarlierStart">改为 {{time(proposal.coordination.earlierStart)}} 出发并预览</button><p v-if="proposalRouteError" class="proposal-error">{{proposalRouteError}}，请重新生成。</p><button class="button primary" @click="applyProposal" :disabled="busy||proposalIssues.length>0||!!proposalRouteError"><Check :size="16"/>{{proposal.departure?'确认顺延并应用':'应用这个安排'}}</button><button class="text-button" @click="proposal=null;response=''">保留原计划</button></div>
      </div>
      <form class="composer" @submit.prevent="submitComposer"><textarea ref="composerInput" v-model="prompt" rows="2" placeholder="杭州想去哪？例如：我想参观浙工大" aria-label="行程调整需求" aria-describedby="composer-help" maxlength="1000" :readonly="busy" :aria-busy="busy" @input="syncComposerValue" @keydown="onPromptKeydown" @compositionend="syncComposerValue"/><p id="composer-help" class="composer-help">选词后 Enter 发送 · Shift+Enter 换行</p><div><span><Sparkles :size="12"/>仅调整 Day {{dayIndex+1}}</span><button type="submit" :disabled="busy||!prompt.trim()" aria-label="发送调整需求"><LoaderCircle v-if="busy" class="spin" :size="16"/><ArrowUp v-else :size="17"/></button></div></form>
-     <p class="assistant-disclaimer">{{proposal?.source==='schedule'?'本次为地点与道路排程计算，确认后才应用':hasModel&&user?'建议仍需结合实际情况确认':'可搜索地点并规划路线；AI 自由调整需登录'}}</p>
+     <p class="assistant-disclaimer">{{proposal?.source==='schedule'?'本次为地点与道路排程计算，确认后才应用':hasModel&&user?'建议仍需结合实际情况确认':'规则规划：支持地点搜索、轻松游、室内替换与晚出发'}}</p>
     </aside>
    </section>
    <footer class="workspace-footer"><span><Leaf :size="13"/>在杭州，把时间留给喜欢的风景。</span><button @click="openModal('help')">示例数据与图片说明<ArrowUpRight :size="12"/></button></footer>

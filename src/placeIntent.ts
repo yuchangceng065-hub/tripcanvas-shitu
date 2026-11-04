@@ -1,9 +1,9 @@
 import {clone,lockedChanges,places,placeById,returnAnchor,schedule,uid,type Place,type Proposal,type Trip} from './domain'
 export function normalizePlaceQuery(query:string){return query.trim().replace(/^浙工大/,'浙江工业大学')}
 export function extractVisitQuery(text:string):string|null {
- const match=text.trim().match(/^(?:我(?:们)?(?:想|要|打算|计划)?(?:去|到|参观|游览|逛)|想(?:去|到|参观|游览|逛)|请(?:帮我)?(?:安排|加入|添加|新增)|(?:帮我|带我)(?:去|参观)|(?:加入|添加|新增)(?:一站)?|去|参观|游览)\s*(.+)$/)
+ const match=text.trim().match(/^(?:我(?:们)?(?:想|要|打算|计划)?(?:去|到|参观|游览|逛|添加|加入|加上)|想(?:去|到|参观|游览|逛)|请(?:帮我)?(?:安排|加入|添加|新增)|(?:帮我|带我)(?:去|参观|添加|加入|加上)|(?:加入|添加|新增)(?:一站)?|去|参观|游览)\s*(.+)$/)
  const bare=text.trim()
- if(!match&&(!/^[^，。！？!?；;]{0,50}(?:大学|学院|校区|寺|塔|公园|博物馆|美术馆|车站|浙工大)$/.test(bare)&&!places.some(p=>p.name===bare)||/不要|不想|删除|取消/.test(bare)))return null
+ if(!match&&(!/^[^，。！？!?；;]{0,50}(?:大学|学院|校区|寺|塔|公园|博物馆|美术馆|车站|浙工大|湿地|景区|古镇|湖|山|岛|故居|广场|码头|咖啡馆)$/.test(bare)&&!places.some(p=>p.name===bare)||/不要|不想|删除|取消/.test(bare)))return null
  let query=(match?.[1]??bare).trim().replace(/^(?:一下|一趟|一站|看看|逛逛)\s*/,'').replace(/[。！？!?]+$/,'').replace(/(?:看看|逛逛|参观(?:一下)?|游览(?:一下)?|玩一下|玩一会儿?)$/,'').trim()
  if(/^(?:室内|轻松|休息|晚点|睡觉|晚出发)/.test(query))return null
  if(/[,，;；]|然后|再去|并且|和.*(?:大学|寺|馆|校区|公园)/.test(query))throw new Error('请一次确认一个地点，例如“我想参观浙工大”，确认后可继续添加。')

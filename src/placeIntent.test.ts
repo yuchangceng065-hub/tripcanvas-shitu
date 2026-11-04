@@ -7,6 +7,7 @@ const campus:Place={id:'osm:way:344311838',name:'浙江工业大学（朝晖校�
 registerPlaces([campus])
 function roads(t:Trip,day:number):RoadRoute {const ids=t.days[day]!.activities.map(a=>a.placeId);return {mode:t.mode,placeIds:ids,source:'osrm',legs:ids.slice(1).map(()=>({distance:1,minutes:60})),geometry:{type:'LineString',coordinates:[[120.13,30.25],[120.16,30.29]]},waypoints:ids.map(()=>({location:[120.13,30.25],distance:0})),fetchedAt:Date.now(),cached:false}}
 describe('想去的地点接入真实路线',()=>{
+ it('支持常见添加说法与裸地点名称',()=>{expect(extractVisitQuery('我想添加灵隐寺')).toBe('灵隐寺');expect(extractVisitQuery('帮我加入西溪湿地')).toBe('西溪湿地');expect(extractVisitQuery('西溪湿地')).toBe('西溪湿地')})
  it('识别自然输入和校区简称，保留具体校区',()=>{expect(extractVisitQuery('我想参观浙工大')).toBe('浙江工业大学');expect(extractVisitQuery('想去浙工大看看')).toBe('浙江工业大学');expect(extractVisitQuery('我想去看看浙工大')).toBe('浙江工业大学');expect(extractVisitQuery('浙工大')).toBe('浙江工业大学');expect(extractVisitQuery('我想去浙工大屏峰校区')).toBe('浙江工业大学屏峰校区');expect(normalizePlaceQuery(' 浙工大朝晖校区 ')).toBe('浙江工业大学朝晖校区')})
  it('室内、轻松和晚出发继续使用对应调整逻辑',()=>{for(const text of ['下雨了，改成室内活动','晚出发一小时','今天轻松一点','我想去室内活动','不要去浙工大'])expect(extractVisitQuery(text)).toBeNull()})
  it('多地点意图要求逐个确认，不默默忽略后半句',()=>expect(()=>extractVisitQuery('我想去灵隐寺，然后去浙工大')).toThrow('一次确认一个'))

@@ -74,7 +74,7 @@ export function proposalErrors(before:Trip,after:Trip,routes:RouteMap={},include
 export function suggest(trip:Trip,dayIndex:number,prompt:string):Proposal {const delay=departureDelay(prompt);if(delay!==null)return departureProposal(trip,dayIndex,delay);const next=clone(trip);const day=next.days[dayIndex]!;const changes:string[]=[];
  if(/室内|雨|下雨/.test(prompt)){const available=places.filter(p=>p.indoor&&p.kind!=='返程'&&!day.activities.some(a=>a.placeId===p.id));day.activities.forEach(a=>{const p=placeById(a.placeId);if(!p.indoor&&a.lock==='none'&&available.length){const replacement=available.shift()!;changes.push(`${p.name} → ${replacement.name}`);a.placeId=replacement.id;a.duration=Math.min(a.duration,replacement.duration)}})}
  else if(/轻松|减少|休息|留白|赶|慢|午休/.test(prompt)){const index=day.activities.findLastIndex(a=>a.lock==='none'&&placeById(a.placeId).kind!=='返程');if(index>=0){const removed=day.activities.splice(index,1)[0]!;changes.push(`移除 ${placeById(removed.placeId).name}，留出 ${removed.duration} 分钟自由时间`)}}
- else throw new Error('示例助手支持地点搜索、“轻松一点”“改成室内”“晚出发一小时”。自由对话需登录并连接模型服务。')
+ else throw new Error('当前使用规则规划。可输入“我想去灵隐寺”搜索并加入地点，或使用“轻松一点”“改成室内”“晚出发一小时”；自由对话将在接入 AI 后开放。')
  if(!changes.length)throw new Error('当前没有符合条件且未锁定的活动。你可以先调整锁定状态。')
  const errors=lockedChanges(trip,next);if(errors.length)throw new Error(errors.join('；'));
  return {id:uid(),baseRevision:trip.revision,trip:next,summary:/室内|雨/.test(prompt)?'把湖边的时光，换成室内的小发现。':/晚|睡|出发/.test(prompt)?'多睡一会儿，也是一种旅行方式。':'少赶一站，多留一点自在。',changes,source:'demo'}

@@ -240,7 +240,8 @@ def login_cookie(response,user,s):
 @app.get('/api/v1/health')
 def health(s:Session=Depends(db)):
     s.execute(select(1))
-    return {'status':'ok','model':all(os.getenv(k) for k in ('MODEL_API_KEY','MODEL_BASE_URL','MODEL_NAME')),'map':'osm','routing':'osrm','storage':'postgresql' if DATABASE_URL.startswith('postgres') else 'sqlite'}
+    enabled=os.getenv('PLANNER_MODE','auto')!='rules' and all(os.getenv(k) for k in ('MODEL_API_KEY','MODEL_BASE_URL','MODEL_NAME'))
+    return {'status':'ok','model':enabled,'plannerMode':'model' if enabled else 'rules','map':'osm','routing':'osrm','storage':'postgresql' if DATABASE_URL.startswith('postgres') else 'sqlite'}
 
 @app.post('/api/v1/routes')
 async def roads(data:RouteBody,request:Request):
@@ -339,6 +340,10 @@ def parse_model_json(content,finish_reason=None):
     if finish_reason=='length':raise ValueError('模型输出被截断')
     if not isinstance(content,str) or not content.strip():raise ValueError('模型未返回正文')
     text=content.strip()
+    # AIHubMix reports exhausted account trial quota as HTTP 200 assistant text.
+    # This is a provider refusal, not malformed model JSON; never repair/retry it.
+    if not text.startswith(('{','```')) and any(message in text.lower() for message in ('accounts that have not been recharged can only try','increase the free quota after recharging','insufficient balance','免费额度已用完','试用次数已用完')):
+        raise HTTPException(503,'模型平台的免费试用额度已用尽，当前无法调用真实 AI。仍可使用地点搜索、道路路线和规则调整。')
     # Some compatible providers return a fenced JSON object despite JSON mode.
     fenced=re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```',text,re.IGNORECASE)
     if fenced:text=fenced.group(1)
@@ -347,6 +352,7 @@ def parse_model_json(content,finish_reason=None):
     return value
 
 async def model_json(system,data,*,validate=None):
+    if os.getenv('PLANNER_MODE','auto')=='rules':raise HTTPException(503,'当前使用规则规划，真实 AI 已暂停。')
     key=os.getenv('MODEL_API_KEY');base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
     if not key or not base or not model:raise HTTPException(503,'尚未配置模型，可选择规则草案')
     messages=[{'role':'system','content':system},{'role':'user','content':json.dumps(data,ensure_ascii=False)}]
@@ -359,7 +365,7 @@ async def model_json(system,data,*,validate=None):
                 # can leave the output budget consumed by hidden reasoning.
                 if model.lower() in ('coding-glm-5.1-free','glm-5.1'):
                     options['thinking']={'type':'disabled'}
-                r=await client.post(base.rstrip('/')+'/chat/completions',headers={'Authorization':'Bearer '+key},json={'model':model,'messages':messages,'response_format':{'type':'json_object'},'temperature':.2,'max_tokens':4096,**options})
+                r=await client.post(base.rstrip('/')+'/chat/completions',headers={'Authorization':'Bearer '+key},json={'model':model,'messages':messages,'response_format':{'type':'json_object'},'temperature':.2,'max_tokens':4096,'stream':False,**options})
                 r.raise_for_status();choice=r.json()['choices'][0];content=choice['message']['content']
             output=parse_model_json(content,choice.get('finish_reason'))
             if validate:validate(output)
@@ -367,7 +373,7 @@ async def model_json(system,data,*,validate=None):
         except (ValueError,KeyError,IndexError,TypeError) as error:
             # Log metadata only, never prompts, model content, credentials or keys.
             logging.getLogger('tripcanvas.model').warning('model response rejected; model=%s attempt=%s reason=%s',model,attempt+1,type(error).__name__)
-            if attempt:raise HTTPException(422,'AI 未能生成符合当前锁定条件的方案，原行程未修改。可简化需求，或先调整固定安排后重试。')
+            if attempt:raise HTTPException(422,'AI 未能生成结构有效且符合约束的方案，原行程未修改。可简化需求或调整固定安排后重试。')
             if isinstance(locals().get('content'),str) and len(content)<=20000:
                 messages.append({'role':'assistant','content':content})
             # Validation errors may contain inputs; only a bounded safe reason is sent.

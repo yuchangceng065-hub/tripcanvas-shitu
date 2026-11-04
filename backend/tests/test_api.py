@@ -178,3 +178,18 @@ def test_free_glm_disables_thinking_and_repairs_locked_edit_once(client,monkeypa
     assert r.json()['source']=='model'
     assert r.json()['trip']['days'][0]['activities'][1]==t['days'][0]['activities'][1]
     assert '固定安排不能修改' in requests[1]['messages'][-1]['content']
+
+def test_rules_mode_health_and_no_model_calls(client,monkeypatch):
+    import asyncio,backend.app as module
+    for key in ('MODEL_API_KEY','MODEL_BASE_URL','MODEL_NAME'):monkeypatch.setenv(key,'configured')
+    monkeypatch.setenv('PLANNER_MODE','rules')
+    data=client.get('/api/v1/health').json();assert data['model'] is False and data['plannerMode']=='rules'
+    with pytest.raises(module.HTTPException) as caught:asyncio.run(module.model_json('system',{}))
+    assert caught.value.status_code==503
+
+def test_provider_trial_notice_is_not_retried_as_invalid_json():
+    from backend.app import parse_model_json,HTTPException
+    with pytest.raises(HTTPException) as caught:
+        parse_model_json('Sorry, to prevent abuse of free resources, accounts that have not been recharged can only try 10 times. You can increase the free quota after recharging; https://console.aihubmix.com/topup')
+    assert caught.value.status_code==503
+    assert '额度已用尽' in caught.value.detail
