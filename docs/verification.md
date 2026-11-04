@@ -242,3 +242,10 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 预算：每用户每日 `PLAN_AGENT_DAILY_LIMIT`（默认 6）、每分钟 2 次；模型不可用返回 503，规则草案可用。
 - 测试（假供应商脚本）：完成流程（route_day → propose_plan → confirm 200）、6 步上限、未知地点错误后 give_up、模型缺失 503；后端 127 项通过。
 - 未做：前端轨迹面板、实时 SSE、真实 Groq 的 Agent 线上验收；P0 仅覆盖“候选已确认 → 方案”。
+
+### 2026-11-05：Agent P0 线上验收（Groq）
+
+- 部署提交 `b236da2` 后，用独立 QA 账号调用真实 `/planner/agent`：`status=completed`，3 步，4.6 秒，模型 3 次请求 / 2,093 token。
+- 方案为 museum + quyuan 一日步行：1.663 km、交通 23 分钟、游览 180 分钟；`evaluate` 仅返回 `meal_break` 警告，无硬冲突；事件序列 model/tool_call/tool_result ×3 + completed。
+- 已知小问题：模型 summary 写“留有足够用餐休息时间”，但实际有 `meal_break` 警告；以方案 issues 为准，不采信模型自述。
+- 未确认前无旅行写入；QA 账号为一次性测试账号。CI 运行 41906442211，Postgres 41906450697，均通过。

@@ -33,7 +33,7 @@
 | 每日步行预算 | 已验证 | 需求字段 `walkBudgetKm`；按高德步行接驳累计，超预算为硬冲突并给删减选项；OSRM 驾车无法拆分步行时跳过并说明 |
 | 用餐 / 休息空档 | 部分 | 11:30—13:30 无 40 分钟空档时给 warning，不阻断保存；不自动插入餐厅或休息 |
 | 真实运行事件（阶段、seq、断线补取） | 已验证（回放） | 规划/草案/建议按 requirements/model/search/validation/completed 落库；`Last-Event-ID` 游标补取；非长连接推送 |
-| 工具调用 Agent（P0） | 已验证（本地） | `/planner/agent`：4 工具、6 步上限、事件落库、确认前不写库；脚本化假供应商测试，真实 Groq 线上未验 |
+| 工具调用 Agent（P0） | 已验证（小样本） | `/planner/agent`：4 工具、6 步上限、事件落库、确认前不写库；假供应商测试 + 线上 Groq 一次 3 步验收 |
 | 模型规划与局部编辑 | 已验证（小样本） | 线上 Groq gpt-oss-20b + 高德，规则草案独立保留；并非任意自然语言都理解 |
 | 多方案每用户日限额 | 已验证 | `PLAN_DAILY_LIMIT` 默认 8 次/天；超出 429，避免单个账号打满高德预算 |
 | CI（测试/构建/评测/迁移） | 已验证 | GitHub Actions：pytest、vitest、build、30 条离线评测、空库 Alembic |
