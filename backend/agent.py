@@ -31,7 +31,8 @@ SYSTEM = '''你是杭州行程规划 Agent。每一步只输出一个 JSON 对�
 {"action":"propose_plan","args":{"days":[["id","id"]],"summary":"一句话说明"}} 提交最终方案
 {"action":"need_input","args":{"question":"需要用户确认的问题"}} 无法继续时反问
 {"action":"give_up","args":{"reason":"原因"}} 放弃并说明
-规则：只能使用候选 id；必去地点每天合计恰好一次；天数必须等于需求天数；每天 1—8 站；提出方案前先 route_day 或 validate_plan；观察结果 ok=false 时调整；最多 6 步；不编造地点、坐标或时间。'''
+规则：只能使用候选 id；必去地点每天合计恰好一次；天数必须等于需求天数；每天 1—8 站；提出方案前先 route_day 或 validate_plan；观察结果 ok=false 时调整；最多 6 步；不编造地点、坐标或时间。
+重要：days只能包含candidates列表中的游览地点ID。requirements里的originPlaceId/destinationPlaceId是程序自动注入的起终点，不能出现在days里。route_day可使用这两个锚点；validate_plan/compare_plans/propose_plan不要包含锚点。'''
 
 
 class Toolbox:
@@ -154,6 +155,8 @@ async def run_agent(data, router, recorder, *, checkpoint=None, persist=None, pr
                                                 'candidates': candidates, 'optionalIds': data.optionalIds,
                                                 'userPreferences': preferences[:6000]}, ensure_ascii=False)},
     ]
+    # Resume persisted actions under current application policy after upgrades.
+    if checkpoint:messages[0]={'role':'system','content':SYSTEM}
     used = checkpoint.get('step', 0) if checkpoint else 0
     def save(step):
         if persist:persist({'messages': messages, 'step': step})

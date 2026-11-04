@@ -147,6 +147,7 @@ def claim_reply(run_id,owner,body):
     if row['version']!=body.version:raise HTTPException(409,'对话已有新回复，请重新读取后提交')
     if row['status'] not in ('needs_input','review','failed','interrupted'):raise HTTPException(409,'当前任务不能接收回复')
     if state.get('replies',0)>=MAX_TURNS:raise HTTPException(422,'本任务补充次数已达上限，请整理需求后新建任务')
+    if state['phase']=='agent' and state.get('checkpoint',{}).get('step',0)>=MAX_TOTAL_STEPS:raise HTTPException(422,'本任务累计规划预算已用完，请整理需求后新建任务')
     if body.confirm and (row['status']!='review' or body.text.strip() or body.choices or body.retry):raise HTTPException(422,'请先补充并核对需求，再单独确认')
     if body.retry and row['status'] not in ('failed','interrupted'):raise HTTPException(422,'当前无需重试')
     if body.retry and (body.text.strip() or body.choices):raise HTTPException(422,'请单独重试原任务，补充条件需另行提交')

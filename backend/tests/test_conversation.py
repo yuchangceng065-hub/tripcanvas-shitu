@@ -139,6 +139,9 @@ def test_execution_resume_keeps_required_places_and_aggregate_step_cap(client,mo
     assert run['status']=='incomplete'
     persisted=load_session(id)['state'];assert persisted['data']['candidateIds']==['quyuan','museum']
     assert persisted['checkpoint']['step']==12
+    row=load_session(id);save_session(id,row['version'],persisted,'failed')
+    assert client.post('/api/v1/planner/conversations/'+id+'/reply',json={
+        'version':row['version'],'requestId':uuid.uuid4().hex,'retry':True}).status_code==422
 
 
 @pytest.mark.parametrize('change,missing',[
@@ -158,8 +161,10 @@ def test_checkpoint_can_restore_after_restart_without_exposing_private_messages(
     monkeypatch.setattr('backend.agent.model_json_messages',ask)
     body={'requirements':{'city':'杭州','startDate':'2026-11-14','days':1,'people':2,'mode':'walk'},'candidateIds':['quyuan','museum'],'optionalIds':[]}
     id=client.post('/api/v1/planner/agent',json=body).json()['runId'];run=wait(client,id)
-    row=load_session(id);save_session(id,row['version'],row['state'],'interrupted')
+    row=load_session(id);row['state']['checkpoint']['messages'][0]['content']='earlier application policy'
+    save_session(id,row['version'],row['state'],'interrupted')
     async def finish(messages,**kwargs):
+        assert 'originPlaceId/destinationPlaceId是程序自动注入' in messages[0]['content']
         assert any('展馆优先' in m['content'] for m in messages)
         return {'action':'propose_plan','args':{'days':[['museum','quyuan']],'summary':'先看展'}}
     monkeypatch.setattr('backend.agent.model_json_messages',finish)

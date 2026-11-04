@@ -20,6 +20,7 @@ const pendingKey='tripcanvas.agent.pending.v1'
 const signature=computed(()=>JSON.stringify([props.title,props.requirements,props.candidateIds,props.optionalIds??[],props.initialRunId??null]))
 const choicesDirty=computed(()=>conversation.value?.mentions.some(m=>(chosen.value[m.key]??'')!==(m.selectedId??''))??false)
 const canReply=computed(()=>!!replyText.value.trim()||choicesDirty.value)
+const replyExhausted=computed(()=>conversation.value?.remainingReplies===0||(conversation.value?.phase==='agent'&&conversation.value.remainingSteps===0))
 const hardErrors=computed(()=>plan.value?.issues.some(issue=>issue.severity==='error')??false)
 const statusLabels:Record<string,string>={connecting:'准备连接',running:'运行中…',completed:'已完成',failed:'运行失败',needs_input:'需要补充',needs_confirmation:'请核对需求',gave_up:'未找到方案',incomplete:'尚未完成',interrupted:'运行已中断',stale:'需求已修改',disconnected:'连接已中断'}
 const tools:Record<string,string>={route_day:'查询道路',validate_plan:'核验安排',compare_plans:'比较方案',propose_plan:'整理最终方案',need_input:'请求补充',give_up:'说明不可行原因'}
@@ -138,11 +139,11 @@ onUnmounted(()=>controller?.abort())
    <form v-if="['needs_input','needs_confirmation'].includes(status)" @submit.prevent="sendAnswer()">
     <label>补充回答<textarea v-model="replyText" @keydown="answerKey" maxlength="1000" rows="3" placeholder="例如：两个人，步行；先去湖边，丝绸馆可选。" :disabled="busy"/></label>
     <p class="form-hint">选词后 Enter 发送 · Shift+Enter 换行</p>
-    <button class="button quiet" type="submit" :disabled="busy||!canReply||conversation.remainingReplies===0">提交补充，继续同一任务</button>
+    <button class="button quiet" type="submit" :disabled="busy||!canReply||replyExhausted">提交补充，继续同一任务</button>
    </form>
    <p v-if="conversation.canConfirm&&canReply" class="form-hint">有尚未提交的补充或地点变更，请先提交，再确认。</p>
    <button v-if="conversation.canConfirm" class="button primary full" @click="sendAnswer(true)" :disabled="busy||canReply||conversation.remainingReplies===0">确认需求与地点，继续规划</button>
-   <button v-if="['failed','interrupted'].includes(status)" class="button quiet" @click="sendAnswer(false,true)" :disabled="busy||conversation.remainingReplies===0">重试本任务</button>
+   <button v-if="['failed','interrupted'].includes(status)" class="button quiet" @click="sendAnswer(false,true)" :disabled="busy||replyExhausted">重试本任务</button>
    <p class="form-hint">还可补充 {{conversation.remainingReplies}} 次 · 规划还可决策 {{conversation.remainingSteps}} 步。必去、返程和时间硬约束不会因自由回答而自动解除。</p>
   </section>
   <div v-if="plan" class="agent-plan" aria-label="Agent 方案完整预览">
