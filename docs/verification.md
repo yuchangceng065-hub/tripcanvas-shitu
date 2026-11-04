@@ -233,3 +233,12 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 同提交的 CI 也通过（run 41902370473）；Render 自动部署后 `/health` 返回 `commit=fe8a199a3309`。
 - Git 历史整理为 9 个里程碑提交并 force push；旧历史保留在本地分支 `backup/pre-clean`（未推送）。
 - 能力清单中“PostgreSQL 兼容性”更新为已验证。
+
+### 2026-11-05：Agent P0（工具调用循环）
+
+- 新增 `backend/agent.py` 与 `POST /api/v1/planner/agent`：模型每步输出一个动作 JSON，服务端执行 `route_day` / `validate_plan` / `compare_plans` / `propose_plan` / `need_input` / `give_up`；默认 6 步上限。
+- 工具只接受已确认候选 id；`propose_plan` 必须通过 `evaluate`（必去、返程、时间、路线）才返回 completed；保存仍走 `/planner/confirm`，Agent 不写库。
+- 运行事件写入 `run_events`：model / tool_call / tool_result / model_error / completed / failed；`/runs/{id}/events` 游标回放。
+- 预算：每用户每日 `PLAN_AGENT_DAILY_LIMIT`（默认 6）、每分钟 2 次；模型不可用返回 503，规则草案可用。
+- 测试（假供应商脚本）：完成流程（route_day → propose_plan → confirm 200）、6 步上限、未知地点错误后 give_up、模型缺失 503；后端 127 项通过。
+- 未做：前端轨迹面板、实时 SSE、真实 Groq 的 Agent 线上验收；P0 仅覆盖“候选已确认 → 方案”。

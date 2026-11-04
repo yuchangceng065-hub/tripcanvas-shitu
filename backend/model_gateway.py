@@ -95,3 +95,41 @@ async def draft_order(data, request):
             raise HTTPException(422, '模型引入未知地点或遗漏候选，草案未保存，请重试')
         source = 'model'
     return order, source, sort_pois
+
+
+async def model_json_messages(messages, *, max_tokens=1200, temperature=.15):
+    """Single JSON turn for the agent loop; no repair messages, the loop retries."""
+    if os.getenv('PLANNER_MODE', 'auto') == 'rules':
+        raise HTTPException(503, '当前使用规则规划，Agent 需要模型服务。')
+    key = model_api_key()
+    base = os.getenv('MODEL_BASE_URL')
+    model = os.getenv('MODEL_NAME')
+    if not key or not base or not model:
+        raise HTTPException(503, '尚未配置模型服务，Agent 不可用；规则草案仍可使用。')
+    trace = current_metrics.get()
+    started = time.monotonic()
+    if trace is not None:
+        trace['providerRequests'] += 1
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            options = model_options(base, model)
+            response = await client.post(base.rstrip('/') + '/chat/completions', headers={'Authorization': 'Bearer ' + key},
+                                         json={'model': model, 'messages': messages, 'response_format': {'type': 'json_object'},
+                                               'temperature': temperature, 'max_tokens': max_tokens, 'stream': False, **options})
+            response.raise_for_status()
+            provider_result = response.json()
+            record_usage(trace, provider_result.get('usage'))
+            choice = provider_result['choices'][0]
+            return parse_model_json(choice['message']['content'], choice.get('finish_reason'))
+    except httpx.HTTPStatusError as error:
+        status = error.response.status_code
+        if status in (401, 403):
+            raise HTTPException(503, '模型密钥无效或没有该模型权限，请检查 ' + model_key_name(base))
+        if status == 429:
+            raise HTTPException(503, '模型服务限流或额度不足，请稍后重试')
+        raise HTTPException(502, '模型服务返回错误，本次运行未完成')
+    except httpx.HTTPError:
+        raise HTTPException(502, '模型服务暂不可用，本次运行未完成')
+    finally:
+        if trace is not None:
+            trace['providerSeconds'] = round(trace['providerSeconds'] + time.monotonic() - started, 4)

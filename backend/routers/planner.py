@@ -2,6 +2,7 @@ import os,uuid
 from fastapi import APIRouter,Depends,HTTPException,Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from backend.agent import run_agent
 from backend.alternatives import PlanSearch
 from backend.places import PLACES,POIS
 from backend.planning import AlternativesBody,DraftBody,evaluate,make_trip
@@ -115,6 +116,22 @@ async def alternatives(data:AlternativesBody,request:Request,user:User=Depends(c
     except Exception as error:
         recorder.fail(getattr(error,'detail',error));raise
 
+
+@router.post('/api/v1/planner/agent')
+async def agent_plan(data:AlternativesBody,request:Request,user:User=Depends(current_user)):
+    """Bounded tool-calling agent over already confirmed candidates."""
+    throttle('agent:'+user.id,2)
+    if request.app.state.alternatives_lock.locked():raise HTTPException(429,'正在核验其他方案，请稍后重试')
+    reserve_user_daily(user.id,'agent',int(os.getenv('PLAN_AGENT_DAILY_LIMIT','6')))
+    if len(data.candidateIds)>data.requirements.days*8:raise HTTPException(422,'候选过多，请减少地点或增加旅行天数')
+    recorder=RunRecorder(user.id,'',0,'agent')
+    try:
+        async with request.app.state.alternatives_lock:
+            result=await run_agent(data,request,recorder)
+            result['modelUsage']=request.state.model_metrics
+            return result
+    except Exception as error:
+        recorder.fail(getattr(error,'detail',error));raise
 
 @router.post('/api/v1/planner/draft')
 async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
