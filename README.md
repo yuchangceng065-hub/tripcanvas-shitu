@@ -10,7 +10,7 @@
 - 线上 API：https://tripcanvas-api.onrender.com/api/v1 ，Render Free 单实例；数据库为 Neon Free PostgreSQL。健康检查返回 `plannerMode=model`、`model=true`、`map=amap`、`routing=amap`、`storage=postgresql`。
 - 线上已验收：注册登录、Bearer 会话、行程同步、版本记录、快照分享与撤销、高德地图与路线、地点搜索、停车接驳。
 - 规划模式：线上已启用 Groq Free Tier 的 `openai/gpt-oss-20b`，支持真实模型分日排序与局部修改；规则草案仍可单独选择。
-- 自动化：前端 75 项（含实际 Vue 组件交互）、后端 101 项测试通过，生产构建通过；最新修复记录见 `docs/verification.md`。
+- 自动化：前端 76 项（含实际 Vue 组件交互）、后端 101 项测试通过，生产构建通过；最新修复记录见 `docs/verification.md`。
 
 ## 当前实现
 
