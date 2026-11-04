@@ -5,7 +5,7 @@ successful routes. A persistent budget callback runs before each paid-capable
 request; one worker serializes requests and bounds cache/queue sizes.
 """
 from __future__ import annotations
-import asyncio,copy,math,os,time
+import asyncio,copy,math,os,re,time
 from collections import OrderedDict
 import httpx
 from fastapi import HTTPException
@@ -27,6 +27,11 @@ def point(value):
 def coord_text(p):return ','.join(f'{v:.6f}' for v in p)
 
 
+def restricted_parking(p):
+    name=str(p.get('name',''));address=str(p.get('address',''))
+    return bool(re.search(r'内部|专用|职工|员工|教工|校内|业主|月租|小区|公寓|大学.*停车|学院.*停车',name) or re.search(r'校内|寺内|院内',address))
+
+
 def normalize_poi(p):
     location=point(p['location']);name=str(p['name']).strip();identity=str(p['id'])
     if not name or not identity or len(identity)>80:raise ValueError('无效地点')
@@ -39,6 +44,7 @@ def normalize_poi(p):
         'coordinateSource':'https://uri.amap.com/marker?position='+coord_text(location),
         'address':' · '.join(str(p[k]) for k in ('cityname','adname','address') if isinstance(p.get(k),str) and p[k])[:500] or '请核对地图位置',
         'retrievedAt':int(time.time()*1000)}
+    if kind=='停车场':result['restrictedAccess']=restricted_parking(result)
     for source,target in [('entr_location','entrance'),('exit_location','exit')]:
         value=navi.get(source) or p.get(source)
         if value:
@@ -119,7 +125,7 @@ class AmapService:
 
     async def parking(self,id):
         position=(await self.coordinates([id]))[id]
-        data=await self.request('/v5/place/around',{'location':coord_text(position),'types':'150900','radius':2000,'sortrule':'distance','page_size':5,'show_fields':'navi'},'search',ttl=3600)
+        data=await self.request('/v5/place/around',{'location':coord_text(position),'types':'150900','radius':2000,'sortrule':'distance','page_size':20,'show_fields':'navi'},'search',ttl=3600)
         return self.save_pois(data,parking=True)
 
     async def segment(self,mode,origin,destination,label):
@@ -167,9 +173,11 @@ class AmapService:
                 else:
                     nearby=await self.parking(id)
                     if not nearby:raise HTTPException(422,self.pois[id]['name']+'附近未找到停车点，请在交通与停车设置中核对，或改用步行')
-                    park=nearby[0]
+                    park=next((p for p in nearby if not restricted_parking(p)),None)
+                    if park is None:raise HTTPException(422,self.pois[id]['name']+'附近目前仅找到可能限制通行的停车点，请在交通与停车中手动核对资格，或改用步行')
                 parkings[id]=park
                 access.append({'placeId':id,'parking':park,'confirmed':bool(selected)})
+                if restricted_parking(park):warnings.append(park['name']+'可能限制外来车辆，请确认通行资格。')
             if any(not a['confirmed'] for a in access):warnings.append('部分停车点由附近搜索推荐，尚未确认车位、开放时间和入口，请在交通与停车中确认。')
         segments_by_leg=[];geometry=[];vehicle=parkings.get(body.placeIds[0])
         for origin_id,dest_id in zip(body.placeIds,body.placeIds[1:]):

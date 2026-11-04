@@ -90,3 +90,19 @@ def test_gps_conversion_is_batched_with_official_separator_and_cached():
 def test_amap_poi_uses_explicit_gcj02_and_navigation_entrance():
     p=normalize_poi({'id':'B001','name':'测试停车场','location':'120.14,30.26','typecode':'150900','cityname':'杭州市','navi':{'entr_location':'120.141,30.261'}})
     assert p['crs']=='GCJ02' and p['kind']=='停车场' and p['entrance']==[120.141,30.261]
+
+def test_internal_parking_is_not_automatically_selected():
+    async def run():
+        pois=fixture_pois();internal={**pois['amap:x'],'id':'amap:internal','name':'浙江工业大学内部停车场'};public=pois['amap:y'];calls=[]
+        async with httpx.AsyncClient(transport=transport(calls)) as client:
+            service=AmapService(client,pois,lambda c:None,lambda p:p,interval=0)
+            async def parking(id):return [internal,public]
+            service.parking=parking
+            r=await service.route(RouteBody(mode='drive',placeIds=['a','b']))
+            assert all(a['parking']['id']=='amap:y' for a in r['accessPoints'])
+            assert all(s['mode']=='walk' for s in r['legs'][0]['segments'])
+            async def internal_only(id):return [internal]
+            service.parking=internal_only
+            with pytest.raises(HTTPException) as e:await service.route(RouteBody(mode='drive',placeIds=['a','b']))
+            assert e.value.status_code==422 and '通行' in e.value.detail
+    asyncio.run(run())

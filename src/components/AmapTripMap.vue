@@ -11,7 +11,7 @@ const container=ref<HTMLDivElement>(),mapError=ref(''),loading=ref(true)
 let A:any,map:any,overlays:any[]=[],markers=new Map<string,any>(),generation=0,disposed=false,observer:ResizeObserver|undefined,lastFit=''
 const identity=()=>props.entries.map(e=>e.activity.id+':'+e.place.id).join(',')+props.mode+':'+props.state.route?.fetchedAt
 function fit(){if(map&&overlays.length)map.setFitView(overlays,false,[80,40,135,40],15)}
-function markerContent(label:string,active:boolean,parking=false){const div=document.createElement('div');div.className='amap-road-pin'+(active?' active':'')+(parking?' parking':'');div.textContent=label;return div}
+function markerContent(label:string,active:boolean,parking=false){const div=document.createElement(parking?'span':'button');if(!parking){(div as HTMLButtonElement).type='button';div.setAttribute('aria-label','选择地点 '+label)}div.className='amap-road-pin'+(active?' active':'')+(parking?' parking':'');div.textContent=label;return div}
 async function render(){
  if(!map)return
  const version=++generation,entries=[...props.entries],route=props.state.status==='ready'&&props.state.route?.source==='amap'?props.state.route:undefined

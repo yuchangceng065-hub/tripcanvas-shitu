@@ -15,7 +15,7 @@ from sqlalchemy import create_engine, String, Text, Integer, Float, select, dele
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 from backend.routing import Router, RouteBody
 from backend.catalog import PlaceSearch
-from backend.amap import AmapService,RoutingGateway,enabled as amap_enabled
+from backend.amap import AmapService,RoutingGateway,enabled as amap_enabled,restricted_parking
 from backend.planning import Requirements, DraftBody, Order, check_order, heuristic, make_trip
 
 ROOT=Path(__file__).parent
@@ -341,9 +341,13 @@ def public_share(token:str,response:Response,s:Session=Depends(db)):
     return json.loads(row.snapshot)
 
 def remember_place(place):
+    known=POIS.get(place['id'])
+    if known and (known.get('provider')!='amap' or 'restrictedAccess' in known):return known
     with SessionLocal() as session:
         row=session.get(PlaceRecord,place['id'])
-        if row:place=json.loads(row.data)
+        if row:
+            place=json.loads(row.data)
+            if place.get('provider')=='amap':place['restrictedAccess']=restricted_parking(place);row.data=json.dumps(place,ensure_ascii=False);session.commit()
         else:session.add(PlaceRecord(id=place['id'],data=json.dumps(place,ensure_ascii=False)));session.commit()
     POIS[place['id']]=place
     return place

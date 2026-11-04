@@ -104,7 +104,7 @@ async function chooseVisit(id:string){
  const place=context.places.find(p=>p.id===id);if(!place)return
  const before=clone(trip.value),day=context.day
  busy.value=true;busyText.value='正在把选中地点加入路线并核验道路…';proposal.value=null;response.value='';proposalRouteError.value='';proposalRoutes.value={...roadRoutes.value}
- try{let next=visitProposal(before,day,place,context.query);if(next.trip.days[day]!.activities.length>1)proposalRoutes.value[routeKey(next.trip,day)]=await loadRoute(next.trip,day);next=await coordinateProposal(before,next,day,proposalRoutes.value,loadRoute,text=>busyText.value=text);assertCurrent(before,day);proposal.value=next;visitSearch.value=null;response.value=next.summary}catch(e){response.value=(e as Error).message}finally{busy.value=false}
+ try{if(connection.routing==='amap'&&before.days[day]!.activities.length<12){const data=await api('/map/coordinates','POST',{placeIds:[...new Set([...before.days[day]!.activities.map(a=>a.placeId),place.id])]});assertCurrent(before,day);for(const [id,location] of Object.entries(data.locations)){const p=placeById(id);if(p)p.routingLocation=location as [number,number]}}let next=visitProposal(before,day,place,context.query);if(next.trip.days[day]!.activities.length>1)proposalRoutes.value[routeKey(next.trip,day)]=await loadRoute(next.trip,day);next=await coordinateProposal(before,next,day,proposalRoutes.value,loadRoute,text=>busyText.value=text);assertCurrent(before,day);proposal.value=next;visitSearch.value=null;response.value=next.summary}catch(e){response.value=(e as Error).message}finally{busy.value=false}
 }
 async function generate(text=prompt.value){
  if(busy.value||!text.trim())return

@@ -21,7 +21,7 @@ export type RouteMap = Record<string, RoadRoute>
 const ttl = 24 * 60 * 60 * 1000
 export function parkingKey(mobility?:Mobility|null){return JSON.stringify([Object.entries(mobility?.parkingByPlace||{}).sort(([a],[b])=>a.localeCompare(b)),mobility?.parkingMinutes??5])}
 export function routeKey(trip: Trip, day: number) {
-  return (connection.routing||'osrm')+':v4:'+parkingKey(trip.mobility)+':'+trip.mode + ':' + (trip.days[day]?.activities.map(a => {const p=placeById(a.placeId);return `${a.placeId}@${p.lng},${p.lat}`}).join(';') || '')
+  return (connection.routing||'osrm')+':v5:'+parkingKey(trip.mobility)+':'+trip.mode + ':' + (trip.days[day]?.activities.map(a => {const p=placeById(a.placeId);return `${a.placeId}@${p.lng},${p.lat}`}).join(';') || '')
 }
 export function matchesRoute(trip: Trip, day: number, route?: RoadRoute) {
   return !!route && (route.source!=='amap'||parkingKey({parkingByPlace:route.parkingByPlace||{},parkingMinutes:route.parkingMinutes??5})===parkingKey(trip.mobility)) && route.mode === trip.mode && route.placeIds.join(',') === trip.days[day]?.activities.map(a => a.placeId).join(',') && route.legs.length === Math.max(0, route.placeIds.length - 1)
@@ -57,7 +57,7 @@ const inFlight = new Map<string,Promise<RoadRoute>>()
 let publicQueue: Promise<unknown> = Promise.resolve(), publicNextAt = 0
 function cachedRoute(key: string, mode: Trip['mode'], ids: string[]) {
   let value = cache.get(key)
-  if (!value) try {value = JSON.parse(localStorage.getItem('tripcanvas.routes.v4.' + key) || 'null')} catch {}
+  if (!value) try {value = JSON.parse(localStorage.getItem('tripcanvas.routes.v5.' + key) || 'null')} catch {}
   if (value && value.source===connection.routing && validRoute(value,mode,ids) && Date.now() < (value.expiresAt??value.fetchedAt+ttl)) return {...value,cached:true}
 }
 async function fetchRoute(mode: Trip['mode'], ids: string[], mobility?:Mobility|null, signal?: AbortSignal): Promise<RoadRoute> {
@@ -97,9 +97,13 @@ export async function loadRoute(trip: Trip, day: number, signal?: AbortSignal): 
   const pending = fetchRoute(trip.mode,ids,trip.mobility,signal).then(value => {
     learnCoordinates(value);cache.set(key,value)
     try {
-      localStorage.setItem('tripcanvas.routes.v4.' + key,JSON.stringify(value))
-      const keys = Object.keys(localStorage).filter(k => k.startsWith('tripcanvas.routes.v4.'))
-      for (const old of keys.slice(0,Math.max(0,keys.length - 32))) localStorage.removeItem(old)
+      const prefix='tripcanvas.routes.v5.',serialized=JSON.stringify(value)
+      // Bound persistent geometry storage so route caching cannot crowd out plans.
+      for(const old of Object.keys(localStorage).filter(k=>/^tripcanvas\.routes\.v[24]\./.test(k)))localStorage.removeItem(old)
+      const keys=Object.keys(localStorage).filter(k=>k.startsWith(prefix)&&k!==prefix+key)
+      let size=keys.reduce((n,k)=>n+(localStorage.getItem(k)?.length||0)*2,0)
+      while(keys.length&&(keys.length>=4||size+serialized.length*2>1000000)){const old=keys.shift()!;size-=(localStorage.getItem(old)?.length||0)*2;localStorage.removeItem(old)}
+      if(serialized.length*2<=500000)localStorage.setItem(prefix+key,serialized)
     } catch {}
     return value
   }).finally(() => inFlight.delete(key))
