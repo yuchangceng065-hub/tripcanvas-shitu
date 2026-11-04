@@ -1,3 +1,5 @@
+[![CI](https://github.com/yuchangceng065-hub/tripcanvas-shitu/actions/workflows/ci.yml/badge.svg)](https://github.com/yuchangceng065-hub/tripcanvas-shitu/actions/workflows/ci.yml)
+
 # 拾途杭州 · TripCanvas
 
 面向杭州 1—3 日短途游的个人行程规划网页，使用 Vue 3 + TypeScript 和 FastAPI。支持真实地点搜索、步行 / 自驾接驳路线及地图时间轴编辑。首次打开是杭州西湖的可编辑示例行程。
@@ -10,7 +12,29 @@
 - 线上 API：https://tripcanvas-api.onrender.com/api/v1 ，Render Free 单实例；数据库为 Neon Free PostgreSQL。健康检查返回 `plannerMode=model`、`model=true`、`map=amap`、`routing=amap`、`storage=postgresql`。
 - 线上已验收：注册登录、Bearer 会话、行程同步、版本记录、快照分享与撤销、高德地图与路线、地点搜索、停车接驳。
 - 规划模式：线上已启用 Groq Free Tier 的 `openai/gpt-oss-20b`，支持真实模型分日排序与局部修改；规则草案仍可单独选择。
-- 自动化：前端 77 项（含实际 Vue 组件交互）、后端 118 项测试通过，生产构建通过；最新修复记录见 `docs/verification.md`。
+- 自动化：前端 81 项（含实际 Vue 组件交互）、后端 121 项测试通过，生产构建通过；GitHub Actions 运行测试、构建、离线评测与空库迁移。最新记录见 `docs/verification.md`。
+
+## 架构
+
+```mermaid
+flowchart LR
+  B[Browser · Vue 3 + TypeScript] -->|HTTPS /api/v1| A[FastAPI 单实例]
+  A --> Q[需求解析与候选]
+  A --> S[有界方案搜索 / 时间协调]
+  A --> V[权威约束校验与确认事务]
+  A --> G[路线网关]
+  G --> AM[高德 Web 服务]
+  G --> OS[OSRM 回退]
+  A --> M[模型适配 · Groq / OpenAI 兼容]
+  A --> D[(PostgreSQL / SQLite)]
+  Q --> D
+  S --> D
+  V --> D
+  E[离线评测 oracle] -.-> S
+```
+- 模型只负责排序与局部编辑，路线、时间、必去与返程由服务端计算并复核。
+- 外部调用有持久化预算、限速与有界缓存；失败明确返回，不静默换供应商。
+- 前端为 Sites 静态托管，API 在 Render，数据库为 Neon PostgreSQL。
 
 ## 当前实现
 
@@ -83,6 +107,18 @@ python3 -m venv .venv
 
 跨源部署需要调整 `FRONTEND_ORIGINS`、HTTPS 会话及反向代理；推荐把前端 `/api` 代理到 Python 服务，保持同源。
 
+
+## 数据库迁移
+
+```sh
+.venv/bin/python -m alembic upgrade head        # 空库或升级
+.venv/bin/python -m alembic current             # 当前版本
+```
+
+- 基线版本 `backend/migrations/versions/`；CI 会在空 SQLite 上执行 `upgrade head` 并核对表结构与模型一致。
+- 已经用 `create_all` 建过表的线上库首次接入时，先备份，再执行一次 `alembic stamp head`，不要重复建表。
+- 本地开发仍会自动建表方便起步；后续 schema 变更以迁移文件为准。
+
 ## PostgreSQL
 
 安装 Docker，并在未提交的 `.env` 中设置 `POSTGRES_PASSWORD` 后：
@@ -103,7 +139,7 @@ npm run build
 .venv/bin/python -m pytest backend/tests -q
 ```
 
-当前结果：前端 77 项、后端 118 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过。
+当前结果：前端 81 项、后端 121 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过；CI 此外运行 `ruff check`（pyflakes 规则）、30 条离线评测与 Alembic 空库迁移。
 
 浏览器验收（需本地 API + Vite + Chrome 调试端口）：`node scripts/browser-check.mjs`，脚本会跑完“一句需求 → 地点确认 → 草案 → 确认保存”，并拒绝在非本地 API 上创建测试账号。测试覆盖锁定保护、仅修改指定日期、时间冲突与顺延协调、中文输入法 Enter、地点意图、道路结构校验、分享快照、撤销、用户隔离、版本幂等、高德响应与预算。
 

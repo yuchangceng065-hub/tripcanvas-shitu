@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import type {PlanComparison} from '../planningOptions'
+import {durationLabel,type PlanComparison} from '../planningOptions'
 import {placeById} from '../domain'
 import type {PlanOption} from '../planningOptions'
 defineProps<{comparison:PlanComparison;selected:string;busy?:boolean}>()
 defineEmits<{choose:[id:string]}>()
 function name(id:string){return placeById(id)?.name??id}
-function minutes(value:number){return `${Math.floor(value/60)} 小时 ${value%60} 分`}
 function queriedAt(option:PlanOption){const dates=Object.values(option.routes).map(r=>r.fetchedAt).filter(Number.isFinite);return dates.length?new Date(Math.min(...dates)).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):''}
 function parkingPending(option:PlanOption){return option.trip.mode==='drive'&&Object.values(option.routes).some(r=>r.source==='amap'&&!r.accessConfirmed)}
 </script>
@@ -18,9 +17,9 @@ function parkingPending(option:PlanOption){return option.trip.mode==='drive'&&Ob
     <div class="option-heading"><strong>{{option.label}}</strong><span>道路与硬约束已核验</span></div>
     <dl class="option-metrics">
      <div><dt>转场步行</dt><dd>{{option.metrics.walkingKm===null?'未能拆分':option.metrics.walkingKm.toFixed(1)+' km'}}</dd></div>
-     <div><dt>交通与接驳</dt><dd>{{minutes(option.metrics.travelMinutes)}}</dd></div>
-     <div><dt>游览停留</dt><dd>{{minutes(option.metrics.visitMinutes)}}</dd></div>
-     <div><dt>可支配空余</dt><dd>{{minutes(option.metrics.freeMinutes)}}</dd></div>
+     <div><dt>交通与接驳</dt><dd>{{durationLabel(option.metrics.travelMinutes)}}</dd></div>
+     <div><dt>游览停留</dt><dd>{{durationLabel(option.metrics.visitMinutes)}}</dd></div>
+     <div><dt>可支配空余</dt><dd>{{durationLabel(option.metrics.freeMinutes)}}</dd></div>
     </dl>
     <div class="option-days"><p v-for="(day,di) in option.trip.days" :key="day.date"><strong>Day {{di+1}}</strong> {{day.activities.map(a=>name(a.placeId)).join(' → ')||'自由活动'}}<small>空余 {{option.metrics.days[di]?.freeMinutes??0}} 分钟</small></p></div>
     <p class="option-tradeoff"><strong>{{option.includedIds.length}} 个游览地点</strong><span v-if="option.omittedIds.length"> · 舍弃可选：{{option.omittedIds.map(name).join('、')}}</span><span v-else> · 保留全部候选</span></p>

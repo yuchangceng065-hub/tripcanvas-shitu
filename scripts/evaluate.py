@@ -63,7 +63,7 @@ def guard(client,task):
   if confirm(t,0).status_code!=409:errors.append('stale_overwrite')
  elif action=='ownership':
   # Retain the first session and try requests using a separate signed-in identity.
-  original=client.cookies.get('tripcanvas_session');client.post('/api/v1/auth/logout')
+  client.post('/api/v1/auth/logout')
   credential={'username':'eval_other_'+os.urandom(4).hex(),'password':'isolated-evaluation-password'}
   r=client.post('/api/v1/auth/register',json=credential)
   if r.status_code!=200:return ['other_account_unavailable']

@@ -179,3 +179,13 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 三套实际结果：少走路 1.663 km / 交通 23 分 / 游览 120 分 / 空余 397 分；充分游览 6.420 km / 交通 87 分 / 游览 360 分 / 空余 93 分；轻松休闲 1.663 km / 交通 23 分 / 游览 180 分 / 空余 337 分。必去集合为曲院风荷、孤山馆区，可选为浙江美术馆、雷峰塔；充分游览保留四处，另两套舍弃两处可选。步行相同的方案明确展示停留和空余差别。
 
 全部方案未确认前无旅行记录；确认充分游览后，PostgreSQL 读取的日期、顺序、时长及必去集合一致。本次样例不构成性能保证或全局最优证明。另补前端手工编辑的必去缺失提示，前端回归为 76 项，后端 101 项。
+
+## 2026-11-05：工程化收口（CI、迁移、可观测性、限额）
+
+- GitHub Actions：`ruff check`（pyflakes 规则）、pytest、vitest、生产构建、30 条离线评测、空库 `alembic upgrade head`；README 加徽章。
+- Alembic：新增基线迁移 `backend/migrations/versions/624782cb8574_baseline_schema.py`，与模型表结构一致；测试用独立 SQLite 执行升级并对比 `Base.metadata`。线上既有库接入需先备份再 `alembic stamp head`。
+- 可观测性：`/health` 返回 `commit`（读取 `RENDER_GIT_COMMIT`/`GIT_COMMIT`）；每个响应带 `X-Request-ID`，日志记录方法、路径、状态码与耗时，不记录查询串/密钥；新增 nosniff、Referrer-Policy、X-Frame-Options、Permissions-Policy，HTTPS 下加 HSTS。
+- 成本保护：`/planner/alternatives` 增加每用户每日限额（`PLAN_DAILY_LIMIT`，默认 8），避免单账号几分钟打满高德日预算。
+- 修复：方案比较里“0 小时 23 分”改为“23 分钟”；移除模型建议后无效的重复算路和未使用变量（Ruff F841/F401）。
+- 结果：前端 81 项、后端 121 项、离线评测 30/30、构建通过。
+- 状态：本地完成并提交；未推送、未部署、未改生产配置。

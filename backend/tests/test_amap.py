@@ -1,4 +1,4 @@
-import asyncio,copy,httpx,pytest
+import asyncio,httpx,pytest
 from fastapi import HTTPException
 from backend.amap import AmapService,RoutingGateway,normalize_poi
 from backend.routing import RouteBody

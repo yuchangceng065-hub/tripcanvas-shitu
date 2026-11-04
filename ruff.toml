@@ -1,0 +1,7 @@
+target-version = "py312"
+line-length = 160
+
+[lint]
+# Start with correctness-only rules; formatting is handled separately.
+select = ["F"]
+exclude = ["backend/migrations/versions"]

@@ -119,6 +119,8 @@ async def lifespan(app):
 app=FastAPI(title='拾途 TripCanvas API',version='1.0.0',lifespan=lifespan)
 ORIGINS=os.getenv('FRONTEND_ORIGINS','http://127.0.0.1:5173,http://localhost:5173').split(',')
 ORIGINS=[origin.strip().rstrip('/') for origin in ORIGINS if origin.strip()]
+COMMIT=(os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_COMMIT') or '').strip()
+if not logging.getLogger().handlers:logging.basicConfig(level=os.getenv('LOG_LEVEL','INFO'),format='%(asctime)s %(levelname)s %(name)s %(message)s')
 app.add_middleware(CORSMiddleware,allow_origins=ORIGINS,allow_credentials=True,allow_methods=['GET','POST','PUT','PATCH','DELETE'],allow_headers=['Content-Type','Idempotency-Key','Authorization'])
 @app.middleware('http')
 async def origin_check(request,call_next):
@@ -133,6 +135,29 @@ async def origin_check(request,call_next):
     trace=current_metrics.set(request.state.model_metrics)
     try:return await call_next(request)
     finally:current_metrics.reset(trace)
+
+REQUEST_ID=re.compile(r'^[A-Za-z0-9._-]{8,64}$')
+
+@app.middleware('http')
+async def request_logging(request,call_next):
+    incoming=request.headers.get('x-request-id','')
+    request_id=incoming if REQUEST_ID.fullmatch(incoming) else uuid.uuid4().hex[:12]
+    request.state.request_id=request_id
+    started=time.perf_counter();status=500
+    try:
+        response=await call_next(request)
+        status=response.status_code
+        response.headers.setdefault('X-Request-ID',request_id)
+        response.headers.setdefault('X-Content-Type-Options','nosniff')
+        response.headers.setdefault('Referrer-Policy','no-referrer')
+        response.headers.setdefault('X-Frame-Options','DENY')
+        response.headers.setdefault('Permissions-Policy','geolocation=(), microphone=(), camera=()')
+        if request.headers.get('x-forwarded-proto')=='https' or os.getenv('COOKIE_SECURE')=='1':
+            response.headers.setdefault('Strict-Transport-Security','max-age=31536000; includeSubDomains')
+        return response
+    finally:
+        logging.getLogger('tripcanvas.request').info('request id=%s method=%s path=%s status=%s ms=%.1f',
+            request_id,request.method,request.url.path,status,(time.perf_counter()-started)*1000)
 
 def db():
     with SessionLocal() as s: yield s
@@ -293,7 +318,7 @@ def login_cookie(response,user,s):
 def health(s:Session=Depends(db)):
     s.execute(select(1))
     enabled=os.getenv('PLANNER_MODE','auto')!='rules' and bool(model_api_key()) and all(os.getenv(k) for k in ('MODEL_BASE_URL','MODEL_NAME'))
-    return {'status':'ok','model':enabled,'plannerMode':'model' if enabled else 'rules','map':'amap' if amap_enabled() else 'osm','routing':'amap' if amap_enabled() else 'osrm','storage':'postgresql' if DATABASE_URL.startswith('postgres') else 'sqlite'}
+    return {'status':'ok','model':enabled,'plannerMode':'model' if enabled else 'rules','map':'amap' if amap_enabled() else 'osm','routing':'amap' if amap_enabled() else 'osrm','storage':'postgresql' if DATABASE_URL.startswith('postgres') else 'sqlite','commit':COMMIT[:12] or None}
 
 @app.post('/api/v1/routes')
 async def roads(data:RouteBody,request:Request,user:User|None=Depends(optional_user)):
@@ -471,6 +496,13 @@ def reserve_anonymous(kind,limit):
     with SessionLocal.begin() as session:
         if _reserve(session,key,limit) is None:
             raise HTTPException(429,'今日未登录体验额度已用完，请登录后继续；未自动升级付费额度。')
+
+def reserve_user_daily(user_id,kind,limit):
+    """Per-account daily allowance for expensive, multi-step planning calls."""
+    key='user:'+kind+':'+user_id+':'+datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    with SessionLocal.begin() as session:
+        if _reserve(session,key,limit) is None:
+            raise HTTPException(429,'今天的方案生成次数已用完，请明天再试；规则草案仍可直接生成。')
 
 def reserve_amap_usage(category):
     groups={'lbs':(10000,500),'search':(1000,100),'map':(5000,500)}
@@ -655,6 +687,7 @@ async def draft_order(data,request):
 async def alternatives(data:AlternativesBody,request:Request,user:User=Depends(current_user)):
     throttle('alternatives:'+user.id,2)
     if request.app.state.alternatives_lock.locked():raise HTTPException(429,'正在核验其他方案，请稍后重试')
+    reserve_user_daily(user.id,'plans',int(os.getenv('PLAN_DAILY_LIMIT','8')))
     if len(data.candidateIds)>data.requirements.days*10:raise HTTPException(422,'候选过多，请减少地点或增加旅行天数，每日最多十个游览候选')
     async with request.app.state.alternatives_lock:
         data.requirements.mustVisitIds=[id for id in data.candidateIds if id not in data.optionalIds]
@@ -696,9 +729,6 @@ async def plan(data:SuggestionBody,request:Request,user:User=Depends(current_use
     try:
         result=validate_edit(output)
     except ValueError:raise HTTPException(422,'模型建议未通过结构或锁定检查，原行程未修改')
-    for i,day in enumerate(result.trip.days):
-        if len(day.activities)>1:
-            roads=await app.state.router.route(route_body(result.trip,day))
     id=str(uuid.uuid4());proposal={'id':id,'baseRevision':data.trip.revision,'trip':snapshot(result.trip),'summary':result.summary,'changes':result.changes,'source':'model','modelUsage':request.state.model_metrics}
     s.add(Run(id=id,owner=user.id,trip_id=data.trip.id,base_revision=data.trip.revision,result=json.dumps(proposal),created=time.time()));s.commit();return proposal
 @app.get('/api/v1/runs/{id}')

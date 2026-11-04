@@ -1,4 +1,4 @@
-import copy, os, tempfile, uuid
+import copy, os, uuid
 from fastapi.testclient import TestClient
 from backend.app import app,Trip,verify_proposal,issues,attempts
 import pytest
@@ -91,7 +91,7 @@ def test_draft_preview_does_not_save_and_refuses_invented_places(client,monkeypa
 
 def test_dynamic_place_is_authoritative_persistent_and_shared(client,monkeypatch):
     from backend.catalog import normalize
-    from backend.app import POIS,PlaceRecord,SessionLocal
+    from backend.app import PlaceRecord,SessionLocal
     register(client)
     place=normalize({'properties':{'name':'测试真实地点','osm_type':'N','osm_id':987654321,'city':'杭州市','street':'测试路'},'geometry':{'type':'Point','coordinates':[120.14,30.25]}})
     async def search(q):return [place]
@@ -524,3 +524,25 @@ def test_alternatives_report_provider_failure_without_feasible_options(client,mo
  monkeypatch.setattr(app.state.router,'route',failed)
  r=client.post('/api/v1/planner/alternatives',json=alternative_body());assert r.status_code==200
  data=r.json();assert not data['options'];assert data['search']['limited'];assert len(calls)==1
+
+def test_alternatives_has_a_daily_per_user_cap(client,monkeypatch):
+    register(client)
+    monkeypatch.setenv('PLAN_DAILY_LIMIT','1')
+    async def roads(body):return fast_roads(body)
+    monkeypatch.setattr(app.state.router,'route',roads)
+    body=draft_body();body['optionalIds']=[]
+    first=client.post('/api/v1/planner/alternatives',json=body)
+    assert first.status_code==200,first.text
+    second=client.post('/api/v1/planner/alternatives',json=body)
+    assert second.status_code==429 and '方案生成次数' in second.json()['detail']
+
+def test_health_exposes_commit_and_security_headers(client,monkeypatch):
+    import backend.app as module
+    monkeypatch.setattr(module,'COMMIT','abcdef1234567890')
+    response=client.get('/api/v1/health',headers={'X-Request-ID':'req-12345678'})
+    assert response.json()['commit']=='abcdef123456'
+    assert response.headers['X-Request-ID']=='req-12345678'
+    assert response.headers['X-Content-Type-Options']=='nosniff'
+    assert response.headers['X-Frame-Options']=='DENY'
+    bad=client.get('/api/v1/health',headers={'X-Request-ID':'bad id with spaces'})
+    assert bad.headers['X-Request-ID']!='bad id with spaces' and len(bad.headers['X-Request-ID'])==12

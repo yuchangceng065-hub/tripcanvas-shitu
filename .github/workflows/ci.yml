@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt ruff
+      - name: Lint (pyflakes rules)
+        run: ruff check backend scripts
+      - name: Tests
+        run: python -m pytest backend/tests -q
+      - name: Offline evaluation (30 fixed tasks)
+        run: python scripts/evaluate.py --output-dir /tmp/evaluation
+      - name: Migration from empty database
+        env:
+          DATABASE_URL: sqlite:////tmp/migration.db
+        run: python -m alembic upgrade head
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
