@@ -17,14 +17,15 @@ from backend.routing import RouteBody
 from backend.schemas import Trip
 from backend.store import snapshot
 from backend.runlog import encode_detail
+from backend.agent_schema import ACTIONS,decision_format
 
-ACTIONS = ('route_day', 'validate_plan', 'compare_plans', 'propose_plan', 'need_input', 'give_up')
 MAX_STEPS = int(__import__('os').getenv('PLAN_AGENT_STEPS', '6'))
 
 SYSTEM = '''你是杭州行程规划 Agent。每一步只输出一个 JSON 对象，不要 Markdown，不要解释。
+这是应用层 JSON 动作调度，不使用供应商原生 tool_calls；不要输出工具调用标记或分析文本。
 可用动作：
 {"action":"route_day","args":{"placeIds":["id","id"],"mode":"walk|drive"}} 查询一天的真实道路
-{"action":"validate_plan","args":{"days":[["id","id"]]}} 校验一套分日安排
+{"action":"validate_plan","args":{"days":[["id","id"]],"summary":"待核验安排"}} 校验一套分日安排
 {"action":"compare_plans","args":{"plans":[[["id"],["id"]]]}} 比较两套安排
 {"action":"propose_plan","args":{"days":[["id","id"]],"summary":"一句话说明"}} 提交最终方案
 {"action":"need_input","args":{"question":"需要用户确认的问题"}} 无法继续时反问
@@ -152,9 +153,10 @@ async def run_agent(data, router, recorder):
                                                 'candidates': candidates, 'optionalIds': data.optionalIds}, ensure_ascii=False)},
     ]
     toolbox = Toolbox(data, router)
+    output_format = decision_format(data.candidateIds, sorted(toolbox.anchors))
     for step in range(1, MAX_STEPS + 1):
         try:
-            decision = await model_json_messages(messages)
+            decision = await model_json_messages(messages, response_format=output_format)
         except HTTPException:
             raise
         except (ValueError, TypeError) as error:

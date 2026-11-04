@@ -1,6 +1,7 @@
 """OpenAI-compatible JSON calls and the model-assisted ordering seed."""
 from __future__ import annotations
 import json, logging, os, re, time
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import HTTPException
@@ -97,7 +98,7 @@ async def draft_order(data, request):
     return order, source, sort_pois
 
 
-async def model_json_messages(messages, *, max_tokens=1200, temperature=.15):
+async def model_json_messages(messages, *, max_tokens=1200, temperature=.15, response_format=None):
     """Single JSON turn for the agent loop; no repair messages, the loop retries."""
     if os.getenv('PLANNER_MODE', 'auto') == 'rules':
         raise HTTPException(503, '当前使用规则规划，Agent 需要模型服务。')
@@ -114,8 +115,9 @@ async def model_json_messages(messages, *, max_tokens=1200, temperature=.15):
     try:
         async with httpx.AsyncClient(timeout=45) as client:
             options = model_options(base, model)
+            output_format = response_format if response_format and urlsplit(base).hostname == 'api.groq.com' and model in ('openai/gpt-oss-20b', 'openai/gpt-oss-120b') else {'type': 'json_object'}
             response = await client.post(base.rstrip('/') + '/chat/completions', headers={'Authorization': 'Bearer ' + key},
-                                         json={'model': model, 'messages': messages, 'response_format': {'type': 'json_object'},
+                                         json={'model': model, 'messages': messages, 'response_format': output_format,
                                                'temperature': temperature, 'max_tokens': max_tokens, 'stream': False, **options})
             response.raise_for_status()
             provider_result = response.json()
@@ -132,7 +134,7 @@ async def model_json_messages(messages, *, max_tokens=1200, temperature=.15):
             code = None
         # Only an explicit generation failure is repairable; configuration,
         # auth and quota errors must not consume the remaining model steps.
-        rejected_json = status == 400 and code == 'json_validate_failed'
+        rejected_json = status == 400 and code in ('json_validate_failed', 'output_parse_failed')
         logging.getLogger('tripcanvas.model').warning('agent provider rejected response; status=%s json_generation_failed=%s', status, rejected_json)
         if rejected_json:
             raise ValueError('供应商未生成有效 JSON，请重新输出一个动作 JSON 对象')

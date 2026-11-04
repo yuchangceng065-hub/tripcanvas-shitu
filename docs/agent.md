@@ -33,8 +33,10 @@
 
 ## 验证口径
 
-本轮自动化：前端 92 项、后端 142 项、Ruff、类型检查与构建通过；原固定工程任务 30/30。新增 Agent 回归覆盖候选越界、同日/跨日重复、必去遗漏、可选取舍、标题、同站往返与返程晚到、有效长 JSON/历史损坏、SSE 状态与跨域游标、断线恢复、去重、取消查看、待运行恢复和旧预览失效。
+本轮自动化：前端 92 项、后端 146 项、Ruff、类型检查与构建通过；原固定工程任务 30/30。新增 Agent 回归覆盖候选越界、同日/跨日重复、必去遗漏、可选取舍、标题、同站往返与返程晚到、有效长 JSON/历史损坏、SSE 状态与跨域游标、断线恢复、去重、取消查看、待运行恢复和旧预览失效。
 
 原来的 30 条是工程固定任务，并非 Agent 模型准确率。真实模型与浏览器验收在 verification.md 追加，测试中脚本化模型不冒充真实 AI。
 
-供应商 JSON 生成失败：仅 HTTP 400 且 error.code=json_validate_failed 时允许模型在剩余步骤内重试；不增加单次运行的 6 步预算，不对其他 400、鉴权或限额错误盲目重试。未报告的 token 仍视为未知。[Groq JSON 模式说明](https://console.groq.com/docs/structured-outputs)。
+供应商 JSON 生成失败：仅 HTTP 400 且 error.code 为 json_validate_failed 或 output_parse_failed 时允许模型在剩余步骤内重试；不增加单次运行的 6 步预算，不对其他 400、鉴权或限额错误盲目重试。未报告的 token 仍视为未知。[Groq JSON 模式说明](https://console.groq.com/docs/structured-outputs)。
+
+Groq GPT-OSS 20B/120B 的动作回复使用 strict JSON Schema（仅精确供应商主机与支持型号启用）；候选枚举、动作和各类参数形状显式约束。不同动作的参数联合使用互不重叠的必填键，满足供应商 schema 限制；其他兼容供应商继续 JSON object 模式。仍由服务端校验动作与参数是否对应、必去、重复、道路及时间，Schema 不替代业务约束。针对真实 output_parse_failed 的步骤重放已返回 200，完整发布后闭环另行记录。

@@ -188,7 +188,7 @@ def test_round_trip_return_deadline_checks_last_occurrence():
     assert not result['ok'] and any(i['code']=='return_deadline' for i in result['issues'])
 
 
-@pytest.mark.parametrize('code,exception', [('json_validate_failed',ValueError),('invalid_request_error',Exception)])
+@pytest.mark.parametrize('code,exception', [('json_validate_failed',ValueError),('output_parse_failed',ValueError),('invalid_request_error',Exception)])
 def test_agent_gateway_only_repairs_explicit_json_generation_failure(client,monkeypatch,caplog,code,exception):
     import asyncio,httpx
     from fastapi import HTTPException
@@ -221,3 +221,28 @@ def test_agent_repairs_json_rejection_within_existing_step_budget(client,monkeyp
     run=wait_run(client,run_id)
     assert run['status']=='completed' and run['modelSteps']==2
     assert run['events'][0]['phase']=='model_error' and 'observation:' in calls[1][-1]['content']
+
+
+@pytest.mark.parametrize('base,model,strict',[
+    ('https://api.groq.com/openai/v1','openai/gpt-oss-20b',True),
+    ('https://api.groq.com/openai/v1','other-model',False),
+    ('https://api.groq.com.invalid/v1','openai/gpt-oss-20b',False),
+])
+def test_agent_strict_format_is_limited_to_supported_provider_models(client,monkeypatch,base,model,strict):
+    import asyncio,json,httpx
+    from backend.agent_schema import decision_format
+    from backend.model_gateway import model_json_messages
+    monkeypatch.setenv('MODEL_BASE_URL',base);monkeypatch.setenv('MODEL_NAME',model);monkeypatch.setenv('GROQ_API_KEY','test-key')
+    original=httpx.AsyncClient;calls=[];schema=decision_format(['museum','quyuan'],['station'])
+    def provider(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200,json={'choices':[{'message':{'content':'{"action":"need_input","args":{"question":"日期？"}}'},'finish_reason':'stop'}]})
+    monkeypatch.setattr('backend.model_gateway.httpx.AsyncClient',lambda **kwargs:original(transport=httpx.MockTransport(provider)))
+    asyncio.run(model_json_messages([{'role':'user','content':'JSON'}],response_format=schema))
+    assert calls[0]['response_format']==(schema if strict else {'type':'json_object'})
+    root=schema['json_schema']['schema'];args=root['properties']['args']
+    keysets=[set(variant['required']) for variant in args['anyOf']]
+    assert all(not left & right for i,left in enumerate(keysets) for right in keysets[i+1:])
+    assert all(variant['additionalProperties'] is False and set(variant['required'])==set(variant['properties']) for variant in args['anyOf'])
+    assert args['anyOf'][1]['properties']['days']['items']['items']['enum']==['museum','quyuan']
+    assert args['anyOf'][0]['properties']['placeIds']['items']['enum']==['museum','quyuan','station']
