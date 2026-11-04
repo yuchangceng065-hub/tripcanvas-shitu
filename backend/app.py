@@ -603,7 +603,7 @@ async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
     trip=Trip.model_validate(make_trip(data,order,POIS));routes={}
     for i,day in enumerate(trip.days):
         if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(trip,day))
-    return {'trip':snapshot(trip),'source':source,'issues':issues(trip,routes),'routes':routes,'warnings':['营业时间、票价、停车与进出景区时间待确认。','草案仅使用你确认的候选地点；保存前请核对。']}
+    return {'trip':snapshot(trip),'source':source,'issues':evaluate(trip,routes,POIS),'routes':routes,'warnings':['营业时间、票价、停车与进出景区时间待确认。','草案仅使用你确认的候选地点；保存前请核对。']}
 
 @app.post('/api/v1/planner/suggest')
 async def plan(data:SuggestionBody,user:User=Depends(current_user),s:Session=Depends(db)):

@@ -2,7 +2,7 @@
 import {ref,computed,watch} from 'vue'
 import {Check,ArrowRight,ArrowLeft,LoaderCircle,Trash2,MapPin,AlertTriangle,Sparkles} from '@lucide/vue'
 import PlacePicker from './PlacePicker.vue'
-import {places,placeById,registerPlaces,time,type Requirements,type Trip,type Place} from '../domain'
+import {clone,places,placeById,registerPlaces,time,type Requirements,type Trip,type Place} from '../domain'
 import {api,confirmTrip} from '../api'
 const props=defineProps<{loggedIn:boolean;hasModel:boolean}>()
 const emit=defineEmits<{created:[trip:Trip];login:[]}>()
@@ -14,7 +14,9 @@ const req=ref<Requirements>({city:'杭州',startDate:'',days:2,people:2,mode:'wa
 const candidateIds=ref<string[]>([])
 const parsed=ref<Parsed|null>(null)
 const chosen=ref<Record<string,string>>({})
-const draft=ref<{trip:Trip;source:string;issues:{message:string}[];warnings:string[]}|null>(null)
+interface RepairOption {action:string;activityId?:string;minutes?:number;day?:number}
+interface DraftIssue {message:string;options?:RepairOption[]}
+const draft=ref<{trip:Trip;source:string;issues:DraftIssue[];warnings:string[]}|null>(null)
 const valid=computed(()=>!!req.value.startDate&&req.value.days>=1&&req.value.days<=3&&req.value.start<req.value.end&&req.value.people>=1&&req.value.people<=10)
 const selected=computed(()=>candidateIds.value.map(id=>placeById(id)))
 const missing=computed(()=>parsed.value?.missing??[])
@@ -68,6 +70,31 @@ async function generate(){
   draft.value=data;step.value=2
  }catch(e){error.value=(e as Error).message}
  finally{busy.value=false}
+}
+
+function placeName(activityId?:string){const hit=draft.value?.trip.days.flatMap(day=>day.activities).find(activity=>activity.id===activityId);return hit?placeById(hit.placeId).name:'该活动'}
+function optionLabel(option:RepairOption){
+ if(option.action==='shorten')return `缩短 ${placeName(option.activityId)} ${option.minutes} 分钟`
+ if(option.action==='extend_day')return `当天结束延后 ${option.minutes} 分钟`
+ if(option.action==='depart_earlier')return `提前 ${option.minutes} 分钟出发`
+ if(option.action==='drop')return `移除 ${placeName(option.activityId)}`
+ return '重新生成草案'
+}
+function applyRepair(option:RepairOption){
+ if(!draft.value||busy.value)return
+ if(option.action==='retry_route'){void generate();return}
+ const next=clone(draft.value.trip)
+ if(option.action==='shorten'&&option.activityId){
+  for(const day of next.days){const activity=day.activities.find(item=>item.id===option.activityId);if(activity){activity.duration=Math.max(15,activity.duration-(option.minutes||0));break}}
+ } else if(option.action==='extend_day'&&option.day!==undefined){
+  const day=next.days[option.day];if(day)day.end=Math.min(1440,day.end+(option.minutes||0))
+ } else if(option.action==='depart_earlier'&&option.day!==undefined){
+  const day=next.days[option.day];if(day)day.start=Math.max(0,day.start-(option.minutes||0))
+ } else if(option.action==='drop'&&option.activityId){
+  for(const day of next.days){const index=day.activities.findIndex(item=>item.id===option.activityId&&item.lock==='none');if(index>=0){day.activities.splice(index,1);break}}
+ }
+ draft.value={...draft.value,trip:next,issues:[]}
+ void save()
 }
 async function save(){
  if(!draft.value||draft.value.issues.length||busy.value)return
@@ -166,7 +193,12 @@ async function save(){
     <h3>Day {{i+1}} · {{day.date}}</h3>
     <p v-for="a in day.activities" :key="a.id"><span>{{placeById(a.placeId).name}}</span><small>{{a.duration}} 分钟{{a.lock==='fixed'?' · 固定到达 '+time(a.fixedStart!):''}}</small></p>
    </section>
-   <p v-for="issue in draft.issues" :key="issue.message" class="form-error"><AlertTriangle :size="13"/>{{issue.message}}</p>
+   <div v-for="(issue,index) in draft.issues" :key="index" class="issue-repair">
+    <p class="form-error"><AlertTriangle :size="13"/>{{issue.message}}</p>
+    <div v-if="issue.options&&issue.options.length" class="repair-options">
+     <button v-for="(option,position) in issue.options" :key="position" @click="applyRepair(option)">{{optionLabel(option)}}</button>
+    </div>
+   </div>
    <p v-for="warning in draft.warnings" :key="warning" class="form-hint">{{warning}}</p>
    <p v-if="error" class="form-error" role="alert">{{error}}</p>
    <div class="modal-actions">

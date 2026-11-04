@@ -36,3 +36,8 @@
 .suggestion-list{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 14px}
 .suggestion-list button{border:1px dashed #cfdcc3;border-radius:6px;padding:5px 8px;font-size:10px;color:#5c7650;background:#fbfcf7}
 .suggestion-list button:disabled{opacity:.5;border-style:solid}
+.issue-repair{margin:6px 0 10px}
+.issue-repair .form-error{margin-bottom:6px}
+.repair-options{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.repair-options button{border:1px solid #cfdcc3;border-radius:6px;padding:6px 9px;font-size:10px;color:#3f6044;background:#f4f8ee}
+.repair-options button:hover{background:#e9f0e1}
