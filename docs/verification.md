@@ -150,3 +150,10 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 路线有效期每秒更新，页面静置也会显示过期状态；现有行程确认重试按归一化目标版本幂等。
 - 验证：73 项前端测试（含 4 项挂载真实 TripBuilder 的 DOM 组件回归），80 项后端测试，类型检查和生产构建通过。组件回归覆盖改选、连续修复、预览失败重试、确认拒绝后的修复恢复；后端使用隔离 SQLite 和模拟道路，不改生产旅行。
 - 原生 Chrome 验收因用户在切换页面而中断，未据此宣称视觉/中文输入法验收通过。生产高德与 PostgreSQL 验收另记。
+
+## 2026-11-05：Groq GPT-OSS 20B 适配
+
+- 用户选择 Groq 免费档的 `openai/gpt-oss-20b`，官方地址 `https://api.groq.com/openai/v1`，专用服务端密钥为 `GROQ_API_KEY`。
+- `backend/model_config.py` 统一探测脚本、健康状态和实际请求的密钥选择与参数。切换 Groq 时不会复用旧的智谱 `MODEL_API_KEY`；缺少 Groq Key 时 health 不报告模型已配置。
+- 按 Groq 官方 GPT-OSS 参数使用 `reasoning_effort=low`、`include_reasoning=false`；不发送该型号不支持的 `reasoning_format` 或 GLM 的 `thinking` 参数。保留 JSON 格式、一次修复上限和业务校验，不自动切换型号或付费档。
+- 自动化：86 项后端、73 项前端通过，类型检查和构建通过。新增精确供应商/型号参数、密钥隔离、健康状态回归；真实模型结果另行记录。

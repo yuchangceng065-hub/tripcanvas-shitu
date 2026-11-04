@@ -478,3 +478,11 @@ def test_return_checks_destination_arrival_and_final_position(client,monkeypatch
     else:t['days'][0]['activities'].append({'id':'b','placeId':'museum','duration':15,'lock':'none'})
     r=client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0});assert r.status_code==422
     assert ('return_deadline' if variant=='late' else 'return_not_final') in {i['code'] for i in r.json()['detail']['issues']}
+
+def test_groq_health_requires_groq_key_not_previous_provider(client,monkeypatch):
+ monkeypatch.setenv('PLANNER_MODE','auto');monkeypatch.setenv('MODEL_BASE_URL','https://api.groq.com/openai/v1')
+ monkeypatch.setenv('MODEL_NAME','openai/gpt-oss-20b');monkeypatch.setenv('MODEL_API_KEY','old-glm-key')
+ monkeypatch.delenv('GROQ_API_KEY',raising=False)
+ assert client.get('/api/v1/health').json()['model'] is False
+ monkeypatch.setenv('GROQ_API_KEY','test-groq-key')
+ assert client.get('/api/v1/health').json()['model'] is True

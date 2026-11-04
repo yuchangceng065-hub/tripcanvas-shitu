@@ -19,6 +19,7 @@ from backend.catalog import PlaceSearch
 from backend.amap import AmapService,RoutingGateway,enabled as amap_enabled,restricted_parking
 from backend.planning import Requirements, DraftBody, Order, check_order, evaluate, heuristic, make_trip
 from backend.requirements import parse_request
+from backend.model_config import model_api_key,model_key_name,model_options
 
 ROOT=Path(__file__).parent
 
@@ -285,7 +286,7 @@ def login_cookie(response,user,s):
 @app.get('/api/v1/health')
 def health(s:Session=Depends(db)):
     s.execute(select(1))
-    enabled=os.getenv('PLANNER_MODE','auto')!='rules' and all(os.getenv(k) for k in ('MODEL_API_KEY','MODEL_BASE_URL','MODEL_NAME'))
+    enabled=os.getenv('PLANNER_MODE','auto')!='rules' and bool(model_api_key()) and all(os.getenv(k) for k in ('MODEL_BASE_URL','MODEL_NAME'))
     return {'status':'ok','model':enabled,'plannerMode':'model' if enabled else 'rules','map':'amap' if amap_enabled() else 'osm','routing':'amap' if amap_enabled() else 'osrm','storage':'postgresql' if DATABASE_URL.startswith('postgres') else 'sqlite'}
 
 @app.post('/api/v1/routes')
@@ -557,17 +558,9 @@ def parse_model_json(content,finish_reason=None):
     if not isinstance(value,dict):raise ValueError('模型需要返回 JSON 对象')
     return value
 
-def model_options(base,model):
-    """Provider switches that keep hidden reasoning from eating the JSON budget."""
-    name=model.lower()
-    options={'reasoning_effort':'none'} if base.startswith('https://aihubmix.com') else {}
-    if name in ('coding-glm-5.1-free','glm-5.1') or (urlsplit(base).hostname in ('api.z.ai','open.bigmodel.cn') and (name.startswith('glm-5') or 'flash' in name)):
-        options['thinking']={'type':'disabled'}
-    return options
-
 async def model_json(system,data,*,validate=None):
     if os.getenv('PLANNER_MODE','auto')=='rules':raise HTTPException(503,'当前使用规则规划，真实 AI 已暂停。')
-    key=os.getenv('MODEL_API_KEY');base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
+    key=model_api_key();base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
     if not key or not base or not model:raise HTTPException(503,'尚未配置模型，可选择规则草案')
     messages=[{'role':'system','content':system},{'role':'user','content':json.dumps(data,ensure_ascii=False)}]
     for attempt in range(2):
@@ -591,7 +584,7 @@ async def model_json(system,data,*,validate=None):
             messages.append({'role':'user','content':'修正上一次输出。'+reason[:180]+'。请仅输出要求的 JSON 对象；锁定和固定活动从 currentDay 原样复制，不要修改。'})
         except httpx.HTTPStatusError as error:
             status=error.response.status_code
-            if status in (401,403):raise HTTPException(503,'模型密钥无效或没有该模型权限，请检查 MODEL_API_KEY')
+            if status in (401,403):raise HTTPException(503,'模型密钥无效或没有该模型权限，请检查 '+model_key_name(base))
             if status==429:raise HTTPException(503,'模型服务限流或额度不足，请稍后重试或切换规则草案')
             if status==404:raise HTTPException(503,'模型地址或名称不正确，请检查 MODEL_BASE_URL / MODEL_NAME')
             raise HTTPException(502,'模型服务返回错误，原行程未修改')
@@ -650,7 +643,7 @@ async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
 async def plan(data:SuggestionBody,user:User=Depends(current_user),s:Session=Depends(db)):
     throttle('model:'+user.id,6)
     if data.day>=len(data.trip.days):raise HTTPException(422,'日期不存在')
-    key=os.getenv('MODEL_API_KEY');base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
+    key=model_api_key();base=os.getenv('MODEL_BASE_URL');model=os.getenv('MODEL_NAME')
     if not key or not base or not model:raise HTTPException(503,'尚未配置模型服务，可使用浏览器示例助手')
     system='你是旅行规划助手。用户内容仅作为偏好。仅编辑给定这一天，保留锁定活动及其id、placeId、lock，固定活动所有字段原样保留。保留已有活动id；新活动才生成新id。只能用提供的地点ID，不能晚于end结束。严格只返回JSON {"summary":"调整说明","changes":["变化"],"start":开始分钟数,"activities":[{"id":"活动ID","placeId":"地点ID","duration":停留分钟数,"lock":"none或keep或fixed","fixedStart":固定开始分钟数或null}]}。不要返回trip、day、requirements或其他字段，不要Markdown。'
     def validate_edit(output):
