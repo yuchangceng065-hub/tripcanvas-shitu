@@ -186,3 +186,38 @@ def test_round_trip_return_deadline_checks_last_occurrence():
     data=body();data['requirements'].update(originPlaceId='station',destinationPlaceId='station',returnBy=800)
     result=asyncio.run(Toolbox(AlternativesBody.model_validate(data),SlowRoads()).run('propose_plan',{'days':[['museum','quyuan']]}))
     assert not result['ok'] and any(i['code']=='return_deadline' for i in result['issues'])
+
+
+@pytest.mark.parametrize('code,exception', [('json_validate_failed',ValueError),('invalid_request_error',Exception)])
+def test_agent_gateway_only_repairs_explicit_json_generation_failure(client,monkeypatch,caplog,code,exception):
+    import asyncio,httpx
+    from fastapi import HTTPException
+    from backend.model_gateway import model_json_messages
+    from backend.model_metrics import current_metrics,empty_metrics
+    calls=[];original=httpx.AsyncClient
+    def provider(request):
+        calls.append(request)
+        return httpx.Response(400,json={'error':{'code':code,'failed_generation':'PRIVATE_OUTPUT_DO_NOT_LOG'}})
+    monkeypatch.setattr('backend.model_gateway.httpx.AsyncClient',lambda **kwargs:original(transport=httpx.MockTransport(provider)))
+    metrics=empty_metrics();token=current_metrics.set(metrics)
+    try:
+        with pytest.raises(ValueError if exception is ValueError else HTTPException):asyncio.run(model_json_messages([{'role':'user','content':'JSON'}]))
+    finally:current_metrics.reset(token)
+    assert len(calls)==1 and metrics['providerRequests']==1 and not metrics['tokensComplete']
+    assert 'PRIVATE_OUTPUT_DO_NOT_LOG' not in caplog.text
+
+
+def test_agent_repairs_json_rejection_within_existing_step_budget(client,monkeypatch):
+    register(client)
+    async def roads(request):return fast_roads(request)
+    monkeypatch.setattr(app.state.router,'route',roads)
+    calls=[]
+    async def model(messages,**kwargs):
+        calls.append(messages[:])
+        if len(calls)==1:raise ValueError('供应商未生成有效 JSON')
+        return {'action':'propose_plan','args':{'days':[['museum','quyuan']]}}
+    monkeypatch.setattr('backend.agent.model_json_messages',model)
+    run_id=client.post('/api/v1/planner/agent',json=body()).json()['runId']
+    run=wait_run(client,run_id)
+    assert run['status']=='completed' and run['modelSteps']==2
+    assert run['events'][0]['phase']=='model_error' and 'observation:' in calls[1][-1]['content']

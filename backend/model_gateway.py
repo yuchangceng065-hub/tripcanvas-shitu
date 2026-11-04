@@ -108,6 +108,7 @@ async def model_json_messages(messages, *, max_tokens=1200, temperature=.15):
         raise HTTPException(503, '尚未配置模型服务，Agent 不可用；规则草案仍可使用。')
     trace = current_metrics.get()
     started = time.monotonic()
+    usage_received = False
     if trace is not None:
         trace['providerRequests'] += 1
     try:
@@ -119,10 +120,22 @@ async def model_json_messages(messages, *, max_tokens=1200, temperature=.15):
             response.raise_for_status()
             provider_result = response.json()
             record_usage(trace, provider_result.get('usage'))
+            usage_received = True
             choice = provider_result['choices'][0]
             return parse_model_json(choice['message']['content'], choice.get('finish_reason'))
     except httpx.HTTPStatusError as error:
         status = error.response.status_code
+        try:
+            payload = error.response.json()
+            code = payload.get('error', {}).get('code')
+        except (ValueError, AttributeError):
+            code = None
+        # Only an explicit generation failure is repairable; configuration,
+        # auth and quota errors must not consume the remaining model steps.
+        rejected_json = status == 400 and code == 'json_validate_failed'
+        logging.getLogger('tripcanvas.model').warning('agent provider rejected response; status=%s json_generation_failed=%s', status, rejected_json)
+        if rejected_json:
+            raise ValueError('供应商未生成有效 JSON，请重新输出一个动作 JSON 对象')
         if status in (401, 403):
             raise HTTPException(503, '模型密钥无效或没有该模型权限，请检查 ' + model_key_name(base))
         if status == 429:
@@ -132,4 +145,5 @@ async def model_json_messages(messages, *, max_tokens=1200, temperature=.15):
         raise HTTPException(502, '模型服务暂不可用，本次运行未完成')
     finally:
         if trace is not None:
+            if not usage_received:trace['tokensComplete'] = False
             trace['providerSeconds'] = round(trace['providerSeconds'] + time.monotonic() - started, 4)
