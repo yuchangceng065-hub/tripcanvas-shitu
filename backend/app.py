@@ -2,99 +2,30 @@
 from __future__ import annotations
 import asyncio, hashlib, hmac, json, logging, math, os, re, secrets, time, uuid
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timezone
-from pathlib import Path
-from typing import Literal
+from datetime import datetime, timezone
 from urllib.parse import urlsplit
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import create_engine, String, Text, Integer, Float, select, delete, update
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
+from sqlalchemy import select, delete, update
+from sqlalchemy.orm import Session
 from backend.routing import Router, RouteBody
 from backend.catalog import PlaceSearch
 from backend.amap import AmapService,RoutingGateway,enabled as amap_enabled,restricted_parking
-from backend.planning import Requirements, DraftBody, AlternativesBody, Order, check_order, evaluate, heuristic, make_trip
+from backend.planning import DraftBody, AlternativesBody, Order, check_order, evaluate, heuristic, make_trip
 from backend.alternatives import PlanSearch
 from backend.model_metrics import current_metrics,empty_metrics,record_usage
 from backend.requirements import parse_request
 from backend.model_config import model_api_key,model_key_name,model_options
 
-ROOT=Path(__file__).parent
-
-def load_local_env(path=ROOT.parent/'.env'):
-    """Optional .env for local runs; real environment variables win."""
-    if not path.exists():return
-    for line in path.read_text(encoding='utf-8').splitlines():
-        line=line.strip()
-        if not line or line.startswith('#') or '=' not in line:continue
-        key,value=line.split('=',1)
-        os.environ.setdefault(key.strip(),value.strip().strip('"').strip("'"))
-load_local_env()
-
-PLACES=json.loads((ROOT/'places.json').read_text())
-POIS={p['id']:p for p in PLACES}
-DATABASE_URL=os.getenv('DATABASE_URL',f'sqlite:///{ROOT / "tripcanvas.db"}')
-if DATABASE_URL.startswith(('postgres://','postgresql://')):
-    DATABASE_URL='postgresql+psycopg://'+DATABASE_URL.split('://',1)[1]
-if (os.getenv('RENDER') or os.getenv('RAILWAY_ENVIRONMENT_ID')) and (not os.getenv('DATABASE_URL') or DATABASE_URL.startswith('sqlite')):
-    raise RuntimeError('Cloud deployment requires a PostgreSQL DATABASE_URL; refusing ephemeral SQLite')
-engine=create_engine(DATABASE_URL,pool_pre_ping=True,**({'connect_args':{'check_same_thread':False}} if DATABASE_URL.startswith('sqlite') else {'pool_size':2,'max_overflow':2,'pool_recycle':300,'connect_args':{'connect_timeout':10,'application_name':'tripcanvas','prepare_threshold':None}}))
-SessionLocal=sessionmaker(engine,expire_on_commit=False)
-class Base(DeclarativeBase): pass
-class User(Base):
-    __tablename__='users'
-    id:Mapped[str]=mapped_column(String,primary_key=True)
-    username:Mapped[str]=mapped_column(String,unique=True)
-    password:Mapped[str]=mapped_column(String)
-class AuthSession(Base):
-    __tablename__='sessions'
-    token:Mapped[str]=mapped_column(String,primary_key=True)
-    owner:Mapped[str]=mapped_column(String,index=True)
-    expires:Mapped[float]=mapped_column(Float)
-class TripRow(Base):
-    __tablename__='trips'
-    id:Mapped[str]=mapped_column(String,primary_key=True)
-    owner:Mapped[str]=mapped_column(String,index=True)
-    revision:Mapped[int]=mapped_column(Integer)
-    snapshot:Mapped[str]=mapped_column(Text)
-class VersionRow(Base):
-    __tablename__='versions'
-    id:Mapped[str]=mapped_column(String,primary_key=True)
-    trip_id:Mapped[str]=mapped_column(String,index=True)
-    revision:Mapped[int]=mapped_column(Integer)
-    snapshot:Mapped[str]=mapped_column(Text)
-    created:Mapped[float]=mapped_column(Float)
-class Share(Base):
-    __tablename__='shares'
-    id:Mapped[str]=mapped_column(String,primary_key=True)
-    token:Mapped[str]=mapped_column(String,unique=True,index=True)
-    owner:Mapped[str]=mapped_column(String,index=True)
-    trip_id:Mapped[str]=mapped_column(String,index=True)
-    snapshot:Mapped[str]=mapped_column(Text)
-    expires:Mapped[float]=mapped_column(Float)
-class PlaceRecord(Base):
-    __tablename__='place_catalog'
-    id:Mapped[str]=mapped_column(String,primary_key=True)
-    data:Mapped[str]=mapped_column(Text)
-
-class ProviderUsage(Base):
-    __tablename__='provider_usage'
-    key:Mapped[str]=mapped_column(String,primary_key=True)
-    count:Mapped[int]=mapped_column(Integer,default=0)
-
-class Run(Base):
-    __tablename__='runs'
-    id:Mapped[str]=mapped_column(String,primary_key=True)
-    owner:Mapped[str]=mapped_column(String,index=True)
-    trip_id:Mapped[str]=mapped_column(String,index=True)
-    base_revision:Mapped[int]=mapped_column(Integer)
-    result:Mapped[str]=mapped_column(Text)
-    created:Mapped[float]=mapped_column(Float)
-    applied:Mapped[int]=mapped_column(Integer,default=0)
+from backend.db import (DATABASE_URL, engine, SessionLocal, Base, User, AuthSession, TripRow,
+                        VersionRow, Share, PlaceRecord, ProviderUsage, Run)
+from backend.places import PLACES, POIS
+from backend.schemas import (Credentials, Trip, TripBody,
+                             ConfirmBody, SuggestionBody, ModelResult, DayEdit, CoordinatesBody,
+                             RequestBody)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -181,79 +112,6 @@ def optional_user(request:Request,s:Session=Depends(db)):
     record=s.get(AuthSession,hashlib.sha256(token.encode()).hexdigest())
     if not record or record.expires<time.time():return None
     return s.get(User,record.owner)
-
-class StrictModel(BaseModel):model_config=ConfigDict(extra='forbid')
-class Credentials(StrictModel):
-    username:str=Field(min_length=3,max_length=32,pattern=r'^[\w\-]+$')
-    password:str=Field(min_length=8,max_length=128)
-class Activity(StrictModel):
-    id:str=Field(min_length=1,max_length=80)
-    placeId:str
-    duration:int=Field(ge=15,le=360)
-    lock:Literal['none','keep','fixed']='none'
-    fixedStart:int|None=Field(default=None,ge=0,le=1439)
-    @model_validator(mode='after')
-    def known(self):
-        if self.placeId not in POIS:raise ValueError('未知地点 ID')
-        if self.lock=='fixed' and self.fixedStart is None:raise ValueError('固定安排必须指定时间')
-        return self
-class Day(StrictModel):
-    date:date
-    start:int=Field(ge=0,le=1439)
-    end:int=Field(ge=1,le=1440)
-    activities:list[Activity]=Field(max_length=12)
-    @model_validator(mode='after')
-    def time_range(self):
-        if self.end<=self.start:raise ValueError('结束时间必须晚于开始时间')
-        return self
-class Mobility(StrictModel):
-    parkingByPlace:dict[str,str]=Field(default_factory=dict,max_length=36)
-    parkingMinutes:int=Field(default=5,ge=0,le=30)
-    @model_validator(mode='after')
-    def valid(self):
-        if any(id not in POIS or park not in POIS or POIS[park].get('kind')!='停车场' for id,park in self.parkingByPlace.items()):raise ValueError('停车点需要先搜索并确认')
-        return self
-
-class Trip(StrictModel):
-    id:str=Field(min_length=1,max_length=80)
-    title:str=Field(min_length=1,max_length=80)
-    city:Literal['杭州']='杭州'
-    people:int=Field(ge=1,le=10)
-    mode:Literal['walk','drive']='walk'
-    days:list[Day]=Field(min_length=1,max_length=3)
-    revision:int=Field(ge=1)
-    requirements:Requirements|None=None
-    mobility:Mobility|None=None
-    placeSnapshots:list[dict]=Field(default_factory=list,max_length=80)
-    @model_validator(mode='after')
-    def unique(self):
-        ids=[a.id for d in self.days for a in d.activities]
-        if len(ids)!=len(set(ids)):raise ValueError('活动 ID 必须唯一')
-        dates=[d.date for d in self.days]
-        if len(set(dates))!=len(dates):raise ValueError('旅行日期不可重复')
-        if self.requirements and (self.requirements.city!=self.city or self.requirements.people!=self.people or self.requirements.mode!=self.mode or self.requirements.days!=len(self.days)):
-            raise ValueError('需求卡片与行程不一致')
-        place_ids=[a.placeId for d in self.days for a in d.activities]+(list(self.mobility.parkingByPlace.values()) if self.mobility else [])
-        self.placeSnapshots=[POIS[id] for id in dict.fromkeys(place_ids) if id.startswith(('osm:','amap:'))]
-        return self
-class TripBody(StrictModel):trip:Trip
-class ConfirmBody(StrictModel):
-    trip:Trip
-    baseRevision:int=Field(ge=0)
-class SuggestionBody(StrictModel):
-    trip:Trip
-    day:int=Field(ge=0,le=2)
-    prompt:str=Field(min_length=1,max_length=1000)
-class ModelResult(StrictModel):
-    summary:str=Field(max_length=300)
-    changes:list[str]=Field(max_length=12)
-    trip:Trip
-
-class DayEdit(StrictModel):
-    summary:str=Field(max_length=300)
-    changes:list[str]=Field(max_length=12)
-    start:int=Field(ge=0,le=1439)
-    activities:list[Activity]=Field(max_length=12)
 
 def snapshot(t:Trip):return t.model_dump(mode='json',exclude_none=True)
 def travel(a,b,mode):
@@ -542,9 +400,6 @@ async def search_parking(id:str,request:Request,user:User|None=Depends(optional_
         reserve_anonymous('parking',60)
     return {'places':await request.app.state.amap.parking(id),'source':'amap'}
 
-class CoordinatesBody(StrictModel):
-    placeIds:list[str]=Field(min_length=1,max_length=12)
-
 @app.post('/api/v1/map/coordinates')
 async def map_coordinates(data:CoordinatesBody,request:Request,user:User|None=Depends(optional_user)):
     if user:throttle('coordinates:'+user.id,30)
@@ -638,9 +493,6 @@ async def model_json(system,data,*,validate=None):
             if trace is not None:
                 if not usage_received:trace['tokensComplete']=False
                 trace['providerSeconds']=round(trace['providerSeconds']+time.monotonic()-started,4)
-
-class RequestBody(StrictModel):
-    text:str=Field(min_length=2,max_length=1000)
 
 @app.post('/api/v1/planner/requirements')
 async def parse_requirements(data:RequestBody,request:Request,user:User=Depends(current_user)):

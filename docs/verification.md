@@ -189,3 +189,10 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 修复：方案比较里“0 小时 23 分”改为“23 分钟”；移除模型建议后无效的重复算路和未使用变量（Ruff F841/F401）。
 - 结果：前端 81 项、后端 121 项、离线评测 30/30、构建通过。
 - 状态：本地完成并提交；未推送、未部署、未改生产配置。
+
+### 2026-11-05：后端模块化（第一批）
+
+- 从 `app.py` 抽出 `backend/db.py`（引擎、Session、全部 ORM 模型）、`backend/schemas.py`（Pydantic 请求模型）和 `backend/places.py`（种子地点目录）；`app.py` 从 715 行降到 597 行。
+- Alembic `env.py` 改为直接从 `backend.db` 读取 `Base`/`DATABASE_URL`，不再导入整个应用。
+- 兼容性：测试与脚本继续从 `backend.app` 导入 `Base`、`SessionLocal`、`Trip` 等名称；121 项后端测试、Ruff 与迁移测试全部通过。
+- 未做：路由仍集中在 `app.py`，下一步可按 auth/trips/planner/places/map 拆成 `APIRouter`。

@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.app import Base, DATABASE_URL  # noqa: E402
+from backend.db import Base, DATABASE_URL  # noqa: E402
 
 config = context.config
 config.set_main_option('sqlalchemy.url', DATABASE_URL.replace('%', '%%'))
