@@ -1,5 +1,5 @@
 """Strict application action schema for providers supporting constrained JSON."""
-ACTIONS = ('route_day', 'validate_plan', 'compare_plans', 'propose_plan', 'need_input', 'give_up')
+ACTIONS = ('route_day', 'validate_plan', 'compare_plans', 'propose_plan', 'search_places', 'add_candidate', 'need_input', 'give_up')
 
 
 def decision_format(candidate_ids, anchor_ids=(), *, repair=False):
@@ -14,6 +14,8 @@ def decision_format(candidate_ids, anchor_ids=(), *, repair=False):
         obj({'plans': {'type': 'array', 'items': days}}),
         obj({'question': {'type': 'string'}}),
         obj({'reason': {'type': 'string'}}),
+        obj({'query': {'type': 'string'}}),
+        obj({'placeId': {'type': 'string'}}),
     ]
     if repair:
         variants.append(obj({'seedDays': days}))

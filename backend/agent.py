@@ -15,7 +15,7 @@ from backend.planning import evaluate, make_trip, walking_km
 from backend.places import POIS
 from backend.routing import RouteBody
 from backend.schemas import Trip
-from backend.store import snapshot
+from backend.store import snapshot, remember_place
 from backend.runlog import encode_detail
 from backend.agent_schema import ACTIONS,decision_format
 
@@ -29,6 +29,8 @@ SYSTEM = '''你是杭州行程规划 Agent。每一步只输出一个 JSON 对�
 {"action":"validate_plan","args":{"days":[["id","id"]],"summary":"待核验安排"}} 校验一套分日安排
 {"action":"compare_plans","args":{"plans":[[["id"],["id"]]]}} 比较两套安排
 {"action":"propose_plan","args":{"days":[["id","id"]],"summary":"一句话说明"}} 提交最终方案
+{"action":"search_places","args":{"query":"..."}} 搜索新的可选地点（最多3次，结果仍需用户最终确认）
+{"action":"add_candidate","args":{"placeId":"搜索结果里的ID"}} 把搜索到的地点加入可选候选（最多2个，不能改必去）
 {"action":"need_input","args":{"question":"需要用户确认的问题"}} 无法继续时反问
 {"action":"give_up","args":{"reason":"原因"}} 放弃并说明
 规则：只能使用候选 id；必去地点每天合计恰好一次；天数必须等于需求天数；每天 1—8 站；提出方案前先 route_day 或 validate_plan；观察结果 ok=false 时调整；最多 6 步；不编造地点、坐标或时间。
@@ -36,9 +38,10 @@ SYSTEM = '''你是杭州行程规划 Agent。每一步只输出一个 JSON 对�
 
 
 class Toolbox:
-    def __init__(self, data, router):
+    def __init__(self, data, router, searcher=None):
         self.data = data
         self.router = router
+        self.searcher = searcher
         self.mode = data.requirements.mode
         self.routes = {}
         self.candidates = set(data.candidateIds)
@@ -54,6 +57,12 @@ class Toolbox:
         if len(visits) != len(set(visits)):
             raise ValueError('游览地点不可重复安排')
         return ids
+
+    async def search(self, query):
+        if self.searcher is None:
+            raise ValueError('当前运行没有可用的地点搜索')
+        found = await self.searcher.search(query)
+        return [remember_place(place) for place in found[:3]]
 
     async def _route(self, ids):
         key = tuple(ids)
@@ -160,15 +169,20 @@ class AgentSteps:
     """Shared model and tool steps for legacy runs and the LangGraph workflow."""
 
     def __init__(self, data, router, recorder, *, checkpoint=None, persist=None,
-                 preferences='', tool_runner=None, reserve_repair=None):
+                 preferences='', tool_runner=None, reserve_repair=None, searcher=None):
         validate_agent_request(data)
         data.requirements.mustVisitIds = [id for id in data.candidateIds if id not in data.optionalIds]
         self.data = data
         self.recorder = recorder
         self.persist = persist
         self.reserve_repair = reserve_repair
-        self.toolbox = Toolbox(data, router)
+        self.toolbox = Toolbox(data, router, searcher)
         self.call_tool = tool_runner or self.toolbox.run
+        self.search_tool = None
+        self.search_hits = {}
+        self.searches = 0
+        self.added = 0
+        self.persist_data = None
         self.actions = (*ACTIONS, 'repair_plan') if reserve_repair else ACTIONS
         candidates = [{'id': id, 'name': POIS[id]['name'], 'kind': POIS[id].get('kind', '地点'),
                        'required': id in data.requirements.mustVisitIds} for id in data.candidateIds]
@@ -202,9 +216,44 @@ class AgentSteps:
         ])
         self.save()
 
+    async def _search(self, args):
+        query = str(args.get('query', '')).strip()
+        if not query or len(query) > 100:
+            raise ValueError('搜索词需要 1—100 个字符')
+        if self.searches >= 3:
+            raise ValueError('本次运行搜索次数已用完（最多 3 次）')
+        self.searches += 1
+        if self.search_tool is not None:
+            places = await self.search_tool(query)
+        else:
+            places = await self.toolbox.search(query)
+        for place in places:
+            self.search_hits[place['id']] = place
+        return {'ok': True, 'summary': {'places': [
+            {'id': place['id'], 'name': place['name'], 'address': place.get('address', '')[:80]} for place in places]}}
+
+    def _add_candidate(self, args):
+        place_id = str(args.get('placeId', '')).strip()
+        if place_id not in self.search_hits:
+            raise ValueError('只能加入本次搜索结果中的地点')
+        if place_id in self.data.candidateIds:
+            raise ValueError('该地点已经在候选里')
+        if self.added >= 2:
+            raise ValueError('本次运行最多补充 2 个可选取舍地点')
+        self.data.candidateIds.append(place_id)
+        self.data.optionalIds.append(place_id)
+        self.toolbox.candidates.add(place_id)
+        self.added += 1
+        if self.persist_data:
+            self.persist_data()
+        self.recorder.event('candidate_added', detail={'placeId': place_id, 'name': self.search_hits[place_id]['name']})
+        return {'ok': True, 'summary': {'added': place_id, 'name': self.search_hits[place_id]['name']}}
+
     async def decide(self):
         self.step += 1
         self.save()
+        self.output_format = decision_format(self.data.candidateIds, sorted(self.toolbox.anchors),
+                                             repair=bool(self.reserve_repair))
         try:
             return await model_json_messages(self.messages, response_format=self.output_format)
         except (ValueError, TypeError) as error:
@@ -239,9 +288,14 @@ class AgentSteps:
             return {'runId': recorder.id, 'status': 'gave_up', 'message': reason}
         recorder.event('tool_call', detail={'step': step, 'tool': action, 'args': args})
         try:
-            if action == 'repair_plan':
-                self.reserve_repair()
-            outcome = await self.call_tool(action, args)
+            if action == 'search_places':
+                outcome = await self._search(args)
+            elif action == 'add_candidate':
+                outcome = self._add_candidate(args)
+            else:
+                if action == 'repair_plan':
+                    self.reserve_repair()
+                outcome = await self.call_tool(action, args)
         except (ValueError, KeyError, TypeError, HTTPException) as error:
             detail = str(getattr(error, 'detail', None) or error)[:300]
             recorder.event('tool_result', status='error',

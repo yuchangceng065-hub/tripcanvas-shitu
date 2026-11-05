@@ -314,3 +314,10 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 事件新增 `search_refine`；补搜成功合并去重，仍由用户按地址确认，模型不自动选第一个。
 - 测试：后端 170 项、前端 101 项、Ruff、构建通过；新增覆盖“看到候选后补搜校区”和去重。
 - 未做：模型自主 `ask_user`（review 仍由程序触发）、开放式多地点反复搜索。
+
+### 2026-11-05：Agent 搜索并补充可选地点
+
+- Agent 动作新增 `search_places`（每次运行最多 3 次）和 `add_candidate`（最多 2 个）：只能加入本次搜索结果中的地点，且只进入 `optionalIds`，不改必去/返程/时间硬约束，最终仍由用户确认整份方案。
+- `/planner/agent` 现在走 LangGraph（`engine=langgraph`），与对话规划共用检查点、MCP 工具和事件；新增 `candidate_added` 事件。
+- 测试：后端 172 项、前端 101 项、Ruff、构建通过；覆盖搜索→加入→方案包含、未搜索地点拒绝、候选白名单扩容。
+- 已知小问题：MCP 工具错误在客户端被概括为“工具参数或返回结构无法通过核验”，模型能看到失败但拿不到原始原因；后续应透传 statusCode/error。

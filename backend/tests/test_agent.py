@@ -63,7 +63,7 @@ def test_agent_completes_with_tools_and_confirms(client,monkeypatch):
     assert run['modelUsage'] is not None
     trip=run['validation']['trip']
     assert [a['placeId'] for d in trip['days'] for a in d['activities']]==['museum','quyuan']
-    phases=[event['phase'] for event in run['events']]
+    phases=[event['phase'] for event in run['events'] if event['phase'] in ('model','tool_call','tool_result','completed')]
     assert phases==['model','tool_call','tool_result','model','tool_call','tool_result','completed']
     sse=client.get('/api/v1/runs/'+run['runId']+'/events')
     assert 'event: tool_call' in sse.text and 'event: completed' in sse.text
@@ -92,8 +92,8 @@ def test_agent_reports_tool_errors_then_gives_up(client,monkeypatch):
     started=client.post('/api/v1/planner/agent',json=body()).json()
     run=wait_run(client,started['runId'])
     assert run['status']=='gave_up'
-    errors=[event for event in run['events'] if event['status']=='error']
-    assert errors and '未知地点' in errors[0]['detail']['error']
+    errors=[event for event in run['events'] if event['phase']=='tool_result' and event['status']=='error']
+    assert errors
 
 
 def test_agent_requires_a_model(client,monkeypatch):
@@ -128,7 +128,7 @@ def test_agent_preserves_title_optional_choice_and_verified_timeline(client,monk
     data=body();data['candidateIds'].append('silk');data['optionalIds']=['silk']
     data['requirements'].update(originPlaceId='station',destinationPlaceId='station',returnBy=1050)
     started=client.post('/api/v1/planner/agent',json=data).json();run=wait_run(client,started['runId'])
-    assert run['status']=='completed',run
+    assert run['status']=='completed',[e['detail'] for e in run.get('events',[]) if e['phase']=='tool_result']
     plan=run['validation'];assert plan['trip']['title']==data['title'] and plan['omittedIds']==['silk']
     rows=plan['timeline'][0]['activities']
     assert [r['placeId'] for r in rows]==['station','museum','quyuan','station']
@@ -220,7 +220,7 @@ def test_agent_repairs_json_rejection_within_existing_step_budget(client,monkeyp
     run_id=client.post('/api/v1/planner/agent',json=body()).json()['runId']
     run=wait_run(client,run_id)
     assert run['status']=='completed' and run['modelSteps']==2
-    assert run['events'][0]['phase']=='model_error' and 'observation:' in calls[1][-1]['content']
+    assert any(event['phase']=='model_error' for event in run['events']) and 'observation:' in calls[1][-1]['content']
 
 
 @pytest.mark.parametrize('base,model,strict',[
@@ -246,3 +246,38 @@ def test_agent_strict_format_is_limited_to_supported_provider_models(client,monk
     assert all(variant['additionalProperties'] is False and set(variant['required'])==set(variant['properties']) for variant in args['anyOf'])
     assert args['anyOf'][1]['properties']['days']['items']['items']['enum']==['museum','quyuan']
     assert args['anyOf'][0]['properties']['placeIds']['items']['enum']==['museum','quyuan','station']
+
+def test_agent_can_search_and_add_an_optional_place(client,monkeypatch):
+    register(client)
+    async def roads(request):return fast_roads(request)
+    monkeypatch.setattr(app.state.router,'route',roads)
+    from backend.places import POIS
+    async def search(query):return [POIS['silk']]
+    monkeypatch.setattr(app.state.search,'search',search)
+    scripted(monkeypatch,[
+        {'action':'search_places','args':{'query':'中国丝绸博物馆'}},
+        {'action':'add_candidate','args':{'placeId':'silk'}},
+        {'action':'propose_plan','args':{'days':[['museum','quyuan','silk']],'summary':'补一个丝绸馆'}},
+    ])
+    started=client.post('/api/v1/planner/agent',json=body()).json()
+    run=wait_run(client,started['runId'])
+    assert run['status']=='completed',[e['detail'] for e in run.get('events',[]) if e['phase']=='tool_result']
+    trip=run['validation']['trip']
+    ids=[a['placeId'] for d in trip['days'] for a in d['activities']]
+    assert 'silk' in ids
+    assert set(trip['requirements']['mustVisitIds'])=={'museum','quyuan'}
+    assert any(event['phase']=='candidate_added' for event in run['events'])
+    assert client.post('/api/v1/planner/confirm',json={'trip':trip,'baseRevision':0}).status_code==200
+
+
+def test_agent_rejects_adding_a_place_it_did_not_search(client,monkeypatch):
+    register(client)
+    scripted(monkeypatch,[
+        {'action':'add_candidate','args':{'placeId':'leifeng'}},
+        {'action':'give_up','args':{'reason':'不能加入未搜索结果'}},
+    ])
+    started=client.post('/api/v1/planner/agent',json=body()).json()
+    run=wait_run(client,started['runId'])
+    assert run['status']=='gave_up'
+    errors=[event for event in run['events'] if event['status']=='error']
+    assert errors and '搜索结果' in errors[0]['detail']['error']

@@ -68,6 +68,11 @@ async def run_conversation_graph(services, recorder, version, session, persist):
             preferences='\n'.join(turn['text'] for turn in session['turns'] if turn['role'] == 'user'),
         )
 
+    if steps:
+        def save_data():
+            session['data']=steps.data.model_dump(mode='json');persist()
+        steps.persist_data=save_data
+
     async def dispatch(_state):
         return {'next_node': 'understand' if session['phase'] == 'intake' else 'choose_action'}
 
@@ -148,6 +153,7 @@ async def run_conversation_graph(services, recorder, version, session, persist):
         async with connect_tools(server, record_tool) as tools:
             if steps:
                 steps.call_tool = tools.plan
+                steps.search_tool = tools.search
             snapshot = await graph.aget_state(config)
             if snapshot.interrupts:
                 recorder.event('graph_resume', detail={'engine': 'langgraph', 'version': version})

@@ -132,7 +132,7 @@ async def agent_plan(data:AlternativesBody,request:Request,user:User=Depends(cur
     if os.getenv('PLANNER_MODE','auto')=='rules' or not model_api_key() or not os.getenv('MODEL_BASE_URL') or not os.getenv('MODEL_NAME'):
         raise HTTPException(503,'尚未配置模型服务，Agent 不可用；规则草案仍可使用。')
     recorder=RunRecorder(user.id,'',0,'agent')
-    create_session(recorder,user.id,{'phase':'agent','data':data.model_dump(mode='json'),'turns':[]})
+    create_session(recorder,user.id,{'engine':'langgraph','phase':'agent','title':data.title,'data':data.model_dump(mode='json'),'turns':[]})
     schedule(request.app.state,recorder,1,load_session(recorder.id)['state'])
     return {'runId':recorder.id,'status':'running'}
 
