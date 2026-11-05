@@ -249,6 +249,71 @@ async def understand(state,recorder,persist):
     persist()
 
 
+
+class RefineQuery(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    text:str=Field(min_length=1,max_length=100)
+    query:str=Field(min_length=1,max_length=100)
+
+class RefineOutput(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    queries:list[RefineQuery]=Field(default_factory=list,max_length=2)
+
+REFINE_SYSTEM='''你是地点搜索助手。给定用户的地点提及和已有候选，判断是否需要更精确的搜索词继续核对（多校区、同名、区域歧义）。
+只返回 {"queries":[{"text":"原提及","query":"更精确的搜索词"}]}，不需要继续就返回 {"queries":[]}。每轮最多两条，不能编造地点 ID、坐标、入口或商户。'''
+
+def refine_format():
+    allowed={'type','properties','required','additionalProperties','items','anyOf','enum','$defs','$ref'}
+    def clean(value):
+        if isinstance(value,list):return [clean(v) for v in value]
+        if not isinstance(value,dict):return value
+        return {k:({name:clean(v) for name,v in item.items()} if k in ('properties','$defs') else clean(item)) for k,item in value.items() if k in allowed}
+    return {'type':'json_schema','json_schema':{'name':'place_search_refinement','strict':True,'schema':clean(RefineOutput.model_json_schema())}}
+
+
+async def refine_places(state, services, recorder, persist, search_places=None):
+    """Observe current candidates, let the model ask for at most two extra searches."""
+    for _round in range(2):
+        if state.get('searchRefineCalls',0)>=2 or state.get('searchCount',0)>=12:break
+        mentions=state.get('mentions') or []
+        if not mentions:break
+        summary=[{'text':m['text'],'role':m['role'],
+                  'candidates':[{'name':c['name'],'address':c.get('address','')} for c in m['candidates'][:3]]} for m in mentions]
+        state['searchRefineCalls']=state.get('searchRefineCalls',0)+1;persist()
+        recorder.event('search_refine',detail={'round':state['searchRefineCalls'],'mentions':len(mentions)})
+        try:
+            output=await model_json_messages([
+                {'role':'system','content':REFINE_SYSTEM},
+                {'role':'user','content':json.dumps({'mentions':summary},ensure_ascii=False)}],
+                max_tokens=600,response_format=refine_format())
+            decision=RefineOutput.model_validate(output)
+        except (HTTPException,ValueError,TypeError):
+            break
+        executed=0
+        for item in decision.queries:
+            mention=next((m for m in mentions if m['text']==item.text),None)
+            if mention is None or state.get('searchCount',0)>=12:continue
+            key=[item.text,item.query]
+            if key in state.setdefault('searchedQueries',[]):continue
+            state['searchedQueries'].append(key)
+            state['searchCount']=state.get('searchCount',0)+1;persist()
+            recorder.event('place_search',detail={'count':state['searchCount'],'query':item.query,'refine':True})
+            try:
+                if search_places is None:
+                    from backend.amap import enabled
+                    searcher=services.amap if enabled() else services.search
+                    found=[remember_place(p) for p in (await searcher.search(item.query))[:3]]
+                else:
+                    found=await search_places(item.query)
+            except HTTPException:continue
+            known={candidate['id'] for candidate in mention['candidates']}
+            for place in found:
+                if place['id'] not in known:
+                    mention['candidates'].append(place);known.add(place['id'])
+            executed+=1
+        persist()
+        if not executed:break
+
 async def ground_places(state, services, recorder, persist, search_places=None):
     previous={m['key']:m for m in state.get('mentions',[])};mentions=[]
     for fact in state['facts']['mentions']:
@@ -261,6 +326,7 @@ async def ground_places(state, services, recorder, persist, search_places=None):
             for query in queries:
                 if state.get('searchCount',0)>=12:break
                 state['searchCount']=state.get('searchCount',0)+1;persist()
+                state.setdefault('searchedQueries',[]).append([fact['text'],query])
                 recorder.event('place_search',detail={'count':state['searchCount'],'query':query})
                 try:
                     if search_places is None:
@@ -278,6 +344,8 @@ async def ground_places(state, services, recorder, persist, search_places=None):
         if not mention['candidates']:mention['error']=mention.get('error','未找到可确认的结果，请补充名称或校区。')
         mentions.append(mention)
     state['mentions']=mentions
+    if any(len(m['candidates'])!=1 for m in mentions):
+        await refine_places(state,services,recorder,persist,search_places)
     state['choices']={key:value for key,value in state.get('choices',{}).items() if key in {m['key'] for m in mentions}}
     persist()
 

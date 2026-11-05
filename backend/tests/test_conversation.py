@@ -221,4 +221,27 @@ def test_ground_places_searches_model_planned_queries_and_dedupes():
     assert calls==['浙江工业大学 朝晖校区','浙江工业大学 屏峰校区','浙工大']
     ids=[candidate['id'] for candidate in state['mentions'][0]['candidates']]
     assert ids==['museum','silk']
-    assert len(events)==3 and all('query' in detail for _,detail in events)
+    searches=[detail for name,detail in events if name=='place_search']
+    assert len(searches)==3 and all('query' in detail for detail in searches)
+
+def test_refine_places_observes_candidates_and_searches_again(monkeypatch):
+    import asyncio
+    from backend.conversation import refine_places
+    state={'mentions':[{'text':'浙工大','role':'visit','required':True,'key':'k','candidates':[POIS['museum']]}],
+           'searchCount':1,'searchedQueries':[['浙工大','浙工大']]}
+    calls=[]
+    async def search(query):
+        calls.append(query);return [POIS['silk']]
+    async def model(*args,**kwargs):
+        return {'queries':[{'text':'浙工大','query':'浙江工业大学 屏峰校区'}]}
+    monkeypatch.setattr('backend.conversation.model_json_messages',model)
+    async def run():
+        class Recorder:
+            def __init__(self):self.events=[]
+            def event(self,name,**kwargs):self.events.append((name,kwargs.get('detail')))
+        recorder=Recorder()
+        await refine_places(state,None,recorder,lambda:None,search)
+        assert calls==['浙江工业大学 屏峰校区']
+        assert [candidate['id'] for candidate in state['mentions'][0]['candidates']]==['museum','silk']
+        assert any(name=='search_refine' for name,_ in recorder.events)
+    asyncio.run(run())
