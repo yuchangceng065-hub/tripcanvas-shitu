@@ -81,7 +81,7 @@ class RunRecorder:
 
     def finish(self, status: str, payload: dict | None = None) -> None:
         self.event(status, detail={'steps': self.seq + 1})
-        self.result = {'kind':self.result.get('kind','agent'), **(payload or {}), 'status': status}
+        self.result = {**self.result, **(payload or {}), 'status': status}
         self._store(self.result)
 
     def complete(self, payload: dict | None = None) -> None:

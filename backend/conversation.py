@@ -401,12 +401,11 @@ def schedule(services,recorder,version,state):
             recorder.fail('本次处理未能完成，任务上下文仍保留，可以重试。')
         finally:
             try:
-                details = {'modelUsage': metrics}
-                if state.get('engine') == 'langgraph':
-                    details['engine'] = 'langgraph'
-                recorder.patch(details)
+                recorder.patch({'modelUsage': metrics})
                 state['usage']=metrics;save_session(recorder.id,version,state,status)
             finally:current_metrics.reset(token)
+    if state.get('engine') == 'langgraph':
+        recorder.patch({'engine':'langgraph'})
     task=asyncio.create_task(work());services.agent_tasks[recorder.id]=task
     def forget(completed):
         if services.agent_tasks.get(recorder.id) is completed:
