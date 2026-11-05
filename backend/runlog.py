@@ -81,7 +81,7 @@ class RunRecorder:
 
     def finish(self, status: str, payload: dict | None = None) -> None:
         self.event(status, detail={'steps': self.seq + 1})
-        self.result = {**(payload or {}), 'status': status}
+        self.result = {'kind':self.result.get('kind','agent'), **(payload or {}), 'status': status}
         self._store(self.result)
 
     def complete(self, payload: dict | None = None) -> None:
@@ -109,5 +109,5 @@ def run_payload(run: Run, events: list[RunEvent]) -> dict:
     payload = json.loads(run.result)
     payload['runId'] = run.id
     payload['events'] = [{'seq': event.seq, 'phase': event.phase, 'status': event.status,
-                          'detail': decode_detail(event.detail)} for event in events]
+                          'createdAt':event.created,'detail': decode_detail(event.detail)} for event in events]
     return payload

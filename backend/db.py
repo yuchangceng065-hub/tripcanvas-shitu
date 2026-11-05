@@ -130,3 +130,16 @@ class PlanningSession(Base):
     status: Mapped[str] = mapped_column(String)
     state: Mapped[str] = mapped_column(Text)
     updated: Mapped[float] = mapped_column(Float)
+
+
+class ScenarioBranch(Base):
+    __tablename__ = 'scenario_branches'
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner: Mapped[str] = mapped_column(String, index=True)
+    source_trip_id: Mapped[str] = mapped_column(String, index=True)
+    source_revision: Mapped[int] = mapped_column(Integer)
+    request_id: Mapped[str] = mapped_column(String, unique=True)
+    request_hash: Mapped[str] = mapped_column(String)
+    label: Mapped[str] = mapped_column(String)
+    snapshot: Mapped[str] = mapped_column(Text)
+    created: Mapped[float] = mapped_column(Float)

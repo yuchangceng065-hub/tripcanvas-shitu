@@ -3,7 +3,7 @@ from fastapi import APIRouter,Depends,HTTPException,Request,Response
 from sqlalchemy import delete,select
 from sqlalchemy.orm import Session
 from backend.app import amap_enabled,current_user,db,owned,persist_trip,route_body,throttle
-from backend.db import Run,Share,TripRow,VersionRow,User
+from backend.db import Run,Share,TripRow,VersionRow,User,ScenarioBranch
 from backend.planning import evaluate
 from backend.places import POIS
 from backend.schemas import Trip,TripBody
@@ -26,6 +26,7 @@ def save_trip(id:str,data:TripBody,user:User=Depends(current_user),s:Session=Dep
 def delete_trip(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
     t=owned(s,id,user)
     for model in (Share,VersionRow,Run):s.execute(delete(model).where(model.trip_id==id))
+    s.execute(delete(ScenarioBranch).where(ScenarioBranch.source_trip_id==id,ScenarioBranch.owner==user.id))
     s.delete(t);s.commit();return {'ok':True}
 
 @router.get('/api/v1/trips/{id}/versions')

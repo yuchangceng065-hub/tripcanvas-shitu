@@ -3,6 +3,7 @@ import {ref,computed,watch,onMounted} from 'vue'
 import {Check,ArrowRight,ArrowLeft,LoaderCircle,Trash2,MapPin,AlertTriangle,Sparkles} from '@lucide/vue'
 import PlacePicker from './PlacePicker.vue'
 import AgentTrace from './AgentTrace.vue'
+import GuideImporter from './GuideImporter.vue'
 import PlanComparison from './PlanComparison.vue'
 import type {PlanComparison as Comparison} from '../planningOptions'
 import {clone,places,placeById,registerPlaces,time,schedule,type Requirements,type Trip,type Place} from '../domain'
@@ -15,6 +16,8 @@ const emit=defineEmits<{created:[trip:Trip];login:[]}>()
 type Role='visit'|'destination'|'origin'
 interface Mention {text:string;role:Role;candidates:Place[];error?:string}
 interface Parsed {requirements:Partial<Requirements>;evidence:Record<string,unknown>;missing:string[];mentions:Mention[];suggestions:Place[];notes:string[];search_source:string}
+const guideOpen=ref(false)
+function importPlaces(items:Place[],optional:string[]){for(const p of items)choose(p);optionalIds.value=[...new Set([...optionalIds.value,...optional])];guideOpen.value=false}
 const step=ref(0),intent=ref(''),title=ref('我的杭州慢游'),error=ref(''),busy=ref(false),parsing=ref(false),useModel=ref(props.hasModel),agentOpen=ref(false)
 const conversationId=ref(''),conversationOpen=ref(false),conversationBusy=ref(false)
 const recentConversations=ref<{runId:string;title:string;status:string}[]>([])
@@ -273,6 +276,8 @@ async function save(){
    </div>
    <p class="form-hint">多方案默认将候选视为必去；勾选“可选”才允许某套方案舍弃它。会尝试跨日分配、顺序与合理停留范围，保留固定返程和时间条件。</p>
    <p v-if="req.originPlaceId||req.destinationPlaceId" class="form-hint">起终点会独立添加，请从游览候选中移除同一地点。</p>
+   <button class="button quiet full" @click="guideOpen=!guideOpen">{{guideOpen?'收起攻略导入':'从收藏的攻略批量导入地点'}}</button>
+   <GuideImporter v-if="guideOpen" :logged-in="loggedIn" @login="emit('login')" @choose="importPlaces"/>
    <PlacePicker :selected="candidateIds" @choose="choose"/>
    <template v-if="parsed&&parsed.suggestions.length">
     <p class="form-hint">按兴趣补充的候选（可跳过）：</p>
