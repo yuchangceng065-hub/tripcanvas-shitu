@@ -66,3 +66,23 @@
 .guide-map{height:280px;position:relative;overflow:hidden;border:1px solid #dce4d2;border-radius:12px;margin-bottom:16px}.guide-map .trip-map{height:100%!important;min-height:0!important}.guide-map>span{position:absolute;bottom:10px;left:10px;background:#fffef5ee;padding:8px;border-radius:6px;z-index:500;font-size:11px;pointer-events:none}
 .branch-compare .different{background:#e4edd8;border-left:3px solid #7b9667;padding:7px 10px;border-radius:4px}
 .lab-pins label,.guide-mention label{flex-direction:row!important}.lab-pins input{margin:3px 0 0!important}.lab-controls>label{gap:8px}
+
+.agent-graph-track {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #dce4d2;
+  border-radius: 12px;
+  background: #f4f7ee;
+  font-size: 12px;
+}
+.agent-graph-track strong { color: #315f4d; }
+.agent-graph-track ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-graph-track li { padding: 4px 8px; border-radius: 6px; background: #e4edd8; }
+.agent-graph-track li:last-child { color: white; background: #315f4d; }

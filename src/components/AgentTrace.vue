@@ -23,9 +23,15 @@ const canReply=computed(()=>!!replyText.value.trim()||choicesDirty.value)
 const replyExhausted=computed(()=>conversation.value?.remainingReplies===0||(conversation.value?.phase==='agent'&&conversation.value.remainingSteps===0))
 const hardErrors=computed(()=>plan.value?.issues.some(issue=>issue.severity==='error')??false)
 const statusLabels:Record<string,string>={connecting:'准备连接',running:'运行中…',completed:'已完成',failed:'运行失败',needs_input:'需要补充',needs_confirmation:'请核对需求',gave_up:'未找到方案',incomplete:'尚未完成',interrupted:'运行已中断',stale:'需求已修改',disconnected:'连接已中断'}
-const tools:Record<string,string>={route_day:'查询道路',validate_plan:'核验安排',compare_plans:'比较方案',propose_plan:'整理最终方案',need_input:'请求补充',give_up:'说明不可行原因'}
+const tools:Record<string,string>={search_places:'查找地点',repair_plan:'搜索可行修复',route_day:'查询道路',validate_plan:'核验安排',compare_plans:'比较方案',propose_plan:'整理最终方案',need_input:'请求补充',give_up:'说明不可行原因'}
+const graphLabels:Record<string,string>={understand:'理解需求',search_places:'地点搜索',review_requirements:'需求核对',choose_action:'选择工具',execute_tool:'处理动作'}
+const graphNodes=computed(()=>events.value.filter(event=>event.phase==='graph_node'))
+const visibleEvents=computed(()=>events.value.filter(event=>event.phase!=='graph_node'))
 const name=(id:string)=>placeById(id)?.name??id
 function label(event:AgentEvent){
+ if(event.phase==='graph_pause')return '检查点已保存，等待你的确认'
+ if(event.phase==='graph_resume')return '已从 LangGraph 检查点恢复'
+ if(event.phase==='mcp_call')return `MCP · ${tools[String(event.detail.tool)]??'规划工具'} · ${event.status==='error'?'发现问题':'已返回'}`
  if(event.phase==='model')return `第 ${event.detail.step??'?'} 步 · ${tools[String(event.detail.action)]??'选择下一步'}`
  if(event.phase==='tool_call')return `正在${tools[String(event.detail.tool)]??'检查方案'}`
  if(event.phase==='tool_result')return event.status==='error'||event.detail.ok===false?'本次检查未通过，继续调整':'已取得检查结果'
@@ -36,6 +42,7 @@ function label(event:AgentEvent){
  return statusLabels[event.phase]??(event.phase==='model_error'?'模型输出需要重试':'处理行程')
 }
 function summary(event:AgentEvent){
+ if(event.phase==='mcp_call'&&typeof event.detail.durationMs==='number')return `${event.detail.durationMs} ms · Streamable HTTP`
  if(typeof event.detail.error==='string')return event.detail.error
  if(event.detail.truncated)return '记录较长，已显示摘要。'
  const value=event.detail.summary as {feasible?:boolean;minutes?:number}|undefined
@@ -119,7 +126,11 @@ onUnmounted(()=>controller?.abort())
  <section class="agent-trace" aria-label="Agent 运行轨迹">
   <header><span class="agent-title"><Sparkles :size="15"/>Agent 运行轨迹</span><small role="status">{{statusLabels[status]??status}}</small></header>
   <p v-if="busy" class="form-hint"><LoaderCircle :size="13" class="spin"/>正在连接本次运行，断线后会继续获取结果…</p>
-  <ol class="agent-steps"><li v-for="event in events" :key="event.seq" :class="event.status"><span>{{label(event)}}</span><small v-if="summary(event)">{{summary(event)}}</small></li></ol>
+  <div v-if="graphNodes.length" class="agent-graph-track" aria-label="LangGraph 节点轨迹">
+   <strong>LangGraph · MCP</strong>
+   <ol><li v-for="node in graphNodes" :key="node.seq">{{graphLabels[String(node.detail.node)]||node.detail.node}}</li></ol>
+  </div>
+  <ol class="agent-steps"><li v-for="event in visibleEvents" :key="event.seq" :class="event.status"><span>{{label(event)}}</span><small v-if="summary(event)">{{summary(event)}}</small></li></ol>
   <p v-if="error" class="form-error" role="alert"><AlertTriangle :size="13"/>{{error}}</p>
   <button v-if="status==='disconnected'&&runId" class="button quiet" @click="observe" :disabled="busy">继续查看本次运行</button>
   <section v-if="conversation&&!busy&&['needs_input','needs_confirmation','failed','interrupted'].includes(status)" class="agent-conversation" aria-label="继续原任务">

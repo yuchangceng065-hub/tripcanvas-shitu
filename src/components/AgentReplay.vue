@@ -7,7 +7,7 @@ interface Event {seq:number;phase:string;status:string;createdAt?:number;detail:
 interface Run {runId:string;status:string;events:Event[];modelUsage?:{providerRequests:number;totalTokens:number;tokensComplete:boolean}}
 const runs=ref<{runId:string;created:number;kind:string;status:string}[]>([]),selected=ref(props.runId||''),run=ref<Run|null>(null),index=ref(0),error=ref(''),loading=ref(false),playing=ref(false)
 let timer:ReturnType<typeof setInterval>|undefined,serial=0
-const labels:Record<string,string>={requirements:'接收条件',understanding:'理解输入',place_search:'搜索真实地点',model:'模型选择动作',tool_call:'调用工具',tool_result:'取得核验结果',model_error:'模型结构修复',search:'比较候选',validation:'核验道路与约束',clarification:'请求确认',needs_input:'等待补充',needs_confirmation:'等待需求确认',resumed:'接回原任务',completed:'完成',failed:'失败',interrupted:'服务中断'}
+const labels:Record<string,string>={graph_node:'LangGraph 节点',graph_pause:'保存检查点',graph_resume:'恢复检查点',mcp_call:'MCP 工具调用',requirements:'接收条件',understanding:'理解输入',place_search:'搜索真实地点',model:'模型选择动作',tool_call:'调用工具',tool_result:'取得核验结果',model_error:'模型结构修复',search:'比较候选',validation:'核验道路与约束',clarification:'请求确认',needs_input:'等待补充',needs_confirmation:'等待需求确认',resumed:'接回原任务',completed:'完成',failed:'失败',interrupted:'服务中断'}
 const current=computed(()=>run.value?.events[index.value])
 const detail=computed(()=>JSON.stringify(current.value?.detail??{},(key,value)=>key==='placeIds'&&Array.isArray(value)?value.map(id=>placeById(id)?.name||id):value,2))
 const gap=computed(()=>{const a=run.value?.events[index.value-1]?.createdAt,b=current.value?.createdAt;return a&&b?Math.max(0,b-a).toFixed(2):null})

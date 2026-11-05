@@ -1,6 +1,6 @@
 """Durable clarify/confirm/resume workflow; private context never enters SSE."""
 from __future__ import annotations
-import asyncio,copy,hashlib,json,time,re
+import asyncio,copy,hashlib,json,logging,time,re
 from datetime import date,datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -224,7 +224,7 @@ def compile_review(state):
     return not missing
 
 
-async def intake(state,services,recorder,persist):
+async def understand(state,recorder,persist):
     if state.get('interpret',True):
         for attempt in range(2):
             if state.get('intakeCalls',0)>=MAX_INTAKE_CALLS:raise HTTPException(422,'本任务理解调用预算已用完，请整理需求后新建任务')
@@ -242,6 +242,10 @@ async def intake(state,services,recorder,persist):
                 break
             except ValueError:
                 if attempt:raise HTTPException(422,'AI 未能可靠理解本次补充，请换一种表达；之前的任务仍保留。')
+    persist()
+
+
+async def ground_places(state, services, recorder, persist, search_places=None):
     previous={m['key']:m for m in state.get('mentions',[])};mentions=[]
     for fact in state['facts']['mentions']:
         key=hashlib.sha256((fact['role']+'\0'+fact['text']).encode()).hexdigest()[:16]
@@ -251,19 +255,33 @@ async def intake(state,services,recorder,persist):
             state['searchCount']=state.get('searchCount',0)+1;persist()
             recorder.event('place_search',detail={'count':state['searchCount']})
             try:
-                from backend.amap import enabled
-                searcher=services.amap if enabled() else services.search
-                mention['candidates']=[remember_place(p) for p in (await searcher.search(fact['text']))[:3]]
+                if search_places is None:
+                    from backend.amap import enabled
+                    searcher = services.amap if enabled() else services.search
+                    mention['candidates'] = [remember_place(p) for p in (await searcher.search(fact['text']))[:3]]
+                else:
+                    mention['candidates'] = await search_places(fact['text'])
             except HTTPException:mention['error']='地点搜索暂不可用，可稍后补充或换一个名称。'
         if not mention['candidates']:mention['error']=mention.get('error','未找到可确认的结果，请补充名称或校区。')
         mentions.append(mention)
     state['mentions']=mentions
     state['choices']={key:value for key,value in state.get('choices',{}).items() if key in {m['key'] for m in mentions}}
+    persist()
+
+
+def review_intake(state, recorder):
     ready=compile_review(state)
     state['turns'].append({'role':'assistant','text':state['question']})
     recorder.event('clarification',detail={'missing':state['missing'],'ready':ready})
     recorder.finish('needs_confirmation' if ready else 'needs_input',{'question':state['question']})
     return 'review' if ready else 'needs_input'
+
+
+async def intake(state,services,recorder,persist):
+    await understand(state, recorder, persist)
+    await ground_places(state, services, recorder, persist)
+    return review_intake(state, recorder)
+
 
 
 def schedule(services,recorder,version,state):
@@ -274,7 +292,12 @@ def schedule(services,recorder,version,state):
             state['usage']=metrics;save_session(recorder.id,version,state)
         try:
             async with services.alternatives_lock:
-                if state['phase']=='intake':status=await asyncio.wait_for(intake(state,services,recorder,persist),240)
+                if state.get('engine') == 'langgraph':
+                    from backend.agent_graph import run_conversation_graph
+                    status = await asyncio.wait_for(
+                        run_conversation_graph(services, recorder, version, state, persist), 240
+                    )
+                elif state['phase']=='intake':status=await asyncio.wait_for(intake(state,services,recorder,persist),240)
                 else:
                     data=AlternativesBody.model_validate(state['data'])
                     def checkpoint(value):state['checkpoint']=value;persist()
@@ -283,13 +306,29 @@ def schedule(services,recorder,version,state):
                     status=result['status']
                     if status=='needs_input':
                         state['question']=result['question'];state.setdefault('turns',[]).append({'role':'assistant','text':result['question']})
+        except asyncio.CancelledError:
+            status = 'interrupted'
+            metrics['tokensComplete'] = False
+            recorder.finish(status, {'error': '服务暂停，任务上下文已保留'})
+            raise
         except TimeoutError:recorder.fail('本次处理超过四分钟，已中断；可以继续同一任务。')
         except HTTPException as error:recorder.fail(error.detail)
-        except Exception:recorder.fail('本次处理未能完成，任务上下文仍保留，可以重试。')
+        except Exception as error:
+            logging.getLogger(__name__).warning(
+                'conversation run %s failed (%s)', recorder.id, type(error).__name__
+            )
+            recorder.fail('本次处理未能完成，任务上下文仍保留，可以重试。')
         finally:
             try:
-                recorder.patch({'modelUsage':metrics})
+                details = {'modelUsage': metrics}
+                if state.get('engine') == 'langgraph':
+                    details['engine'] = 'langgraph'
+                recorder.patch(details)
                 state['usage']=metrics;save_session(recorder.id,version,state,status)
             finally:current_metrics.reset(token)
     task=asyncio.create_task(work());services.agent_tasks[recorder.id]=task
-    task.add_done_callback(lambda _:services.agent_tasks.pop(recorder.id,None))
+    def forget(completed):
+        if services.agent_tasks.get(recorder.id) is completed:
+            services.agent_tasks.pop(recorder.id, None)
+
+    task.add_done_callback(forget)

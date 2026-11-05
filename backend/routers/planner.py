@@ -144,7 +144,7 @@ async def begin_conversation(data:ConversationStart,request:Request,user:User=De
     if request.app.state.alternatives_lock.locked():raise HTTPException(429,'正在处理其他任务，请稍后重试')
     reserve_user_daily(user.id,'agent',int(os.getenv('PLAN_AGENT_DAILY_LIMIT','6')))
     recorder=RunRecorder(user.id,'',0,'conversation')
-    state={'phase':'intake','title':data.title,'turns':[{'role':'user','text':data.text.strip()}],
+    state={'engine':'langgraph','phase':'intake','title':data.title,'turns':[{'role':'user','text':data.text.strip()}],
            'interpret':True,'facts':None,'mentions':[],'choices':{},'replies':0}
     create_session(recorder,user.id,state);schedule(request.app.state,recorder,1,state)
     return {'runId':recorder.id,'status':'running'}

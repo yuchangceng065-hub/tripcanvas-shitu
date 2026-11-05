@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from fastapi import HTTPException
 
-from backend.alternatives import metrics
+from backend.alternatives import PlanSearch, metrics
 from backend.model_gateway import model_json_messages
 from backend.planning import evaluate, make_trip, walking_km
 from backend.places import POIS
@@ -108,6 +108,19 @@ class Toolbox:
                 compared.append({'feasible': not [issue for issue in issues if issue['severity'] == 'error'],
                                  'issues': [issue for issue in issues if issue['severity'] == 'error'][:4], 'metrics': summary})
             return {'ok': True, 'summary': compared}
+        if action == 'repair_plan':
+            seed = args.get('seedDays')
+            self._trip(seed)
+            search = PlanSearch(self.data, POIS, POIS, self.router.route, Trip.model_validate,
+                                max_routes=5, max_states=10, seconds=25)
+            found = await search.search(seed)
+            if not found['options']:
+                return {'ok': False, 'summary': {'feasible': False, 'search': found['search'],
+                        'issues': (found['diagnostic'] or {}).get('issues', [])[:6]}}
+            option = found['options'][0]
+            return {'ok': True, 'trip': Trip.model_validate(option['trip']),
+                    'routes': option['routes'], 'issues': option['issues'],
+                    'summary': {'feasible': True, 'metrics': option['metrics'], 'search': found['search']}}
         raise ValueError('未知动作：' + str(action))
 
 
@@ -143,50 +156,81 @@ def timeline(trip, routes):
     return days
 
 
-async def run_agent(data, router, recorder, *, checkpoint=None, persist=None, preferences=''):
-    """Execute up to MAX_STEPS model decisions; returns the public result dict."""
-    validate_agent_request(data)
-    data.requirements.mustVisitIds = [id for id in data.candidateIds if id not in data.optionalIds]
-    candidates = [{'id': id, 'name': POIS[id]['name'], 'kind': POIS[id].get('kind', '地点'),
-                   'required': id in data.requirements.mustVisitIds} for id in data.candidateIds]
-    messages = checkpoint['messages'] if checkpoint else [
-        {'role': 'system', 'content': SYSTEM},
-        {'role': 'user', 'content': json.dumps({'requirements': data.requirements.model_dump(mode='json'),
-                                                'candidates': candidates, 'optionalIds': data.optionalIds,
-                                                'userPreferences': preferences[:6000]}, ensure_ascii=False)},
-    ]
-    # Resume persisted actions under current application policy after upgrades.
-    if checkpoint:messages[0]={'role':'system','content':SYSTEM}
-    used = checkpoint.get('step', 0) if checkpoint else 0
-    def save(step):
-        if persist:persist({'messages': messages, 'step': step})
-    toolbox = Toolbox(data, router)
-    output_format = decision_format(data.candidateIds, sorted(toolbox.anchors))
-    for step in range(used + 1, min(used + MAX_STEPS, MAX_TOTAL_STEPS) + 1):
-        save(step)  # A provider attempt consumes budget even if the process stops.
+class AgentSteps:
+    """Shared model and tool steps for legacy runs and the LangGraph workflow."""
+
+    def __init__(self, data, router, recorder, *, checkpoint=None, persist=None,
+                 preferences='', tool_runner=None, reserve_repair=None):
+        validate_agent_request(data)
+        data.requirements.mustVisitIds = [id for id in data.candidateIds if id not in data.optionalIds]
+        self.data = data
+        self.recorder = recorder
+        self.persist = persist
+        self.reserve_repair = reserve_repair
+        self.toolbox = Toolbox(data, router)
+        self.call_tool = tool_runner or self.toolbox.run
+        self.actions = (*ACTIONS, 'repair_plan') if reserve_repair else ACTIONS
+        candidates = [{'id': id, 'name': POIS[id]['name'], 'kind': POIS[id].get('kind', '地点'),
+                       'required': id in data.requirements.mustVisitIds} for id in data.candidateIds]
+        self.messages = list(checkpoint['messages']) if checkpoint else [
+            {'role': 'system', 'content': SYSTEM},
+            {'role': 'user', 'content': json.dumps({
+                'requirements': data.requirements.model_dump(mode='json'),
+                'candidates': candidates,
+                'optionalIds': data.optionalIds,
+                'userPreferences': preferences[:6000],
+            }, ensure_ascii=False)},
+        ]
+        self.messages[0] = {'role': 'system', 'content': SYSTEM + (
+            '\n若验证显示冲突，可调用一次 {"action":"repair_plan","args":{"seedDays":[["id"]]}}。'
+            'seedDays 必须是已核对的游览候选顺序，程序将尝试换序、分日和可选地点取舍。'
+            if reserve_repair else ''
+        )}
+        self.step = checkpoint.get('step', 0) if checkpoint else 0
+        self.limit = min(self.step + MAX_STEPS, MAX_TOTAL_STEPS)
+        self.output_format = decision_format(data.candidateIds, sorted(self.toolbox.anchors),
+                                             repair=bool(reserve_repair))
+
+    def save(self):
+        if self.persist:
+            self.persist({'messages': self.messages, 'step': self.step})
+
+    def observe(self, decision, result):
+        self.messages.extend([
+            {'role': 'assistant', 'content': _observation(decision)},
+            {'role': 'user', 'content': 'observation: ' + _observation(result)},
+        ])
+        self.save()
+
+    async def decide(self):
+        self.step += 1
+        self.save()
         try:
-            decision = await model_json_messages(messages, response_format=output_format)
-        except HTTPException:
-            raise
+            return await model_json_messages(self.messages, response_format=self.output_format)
         except (ValueError, TypeError) as error:
-            recorder.event('model_error', status='error', detail={'step': step, 'error': str(error)[:200]})
-            messages.append({'role': 'user', 'content': 'observation: 输出不是有效的动作 JSON，请只输出一个 JSON 对象。'})
-            save(step)
-            continue
+            self.recorder.event('model_error', status='error',
+                                detail={'step': self.step, 'error': str(error)[:200]})
+            self.messages.append({'role': 'user', 'content': 'observation: 输出不是有效的动作 JSON，请只输出一个 JSON 对象。'})
+            self.save()
+            return None
+
+    async def act(self, decision):
         action = decision.get('action')
         args = decision.get('args') if isinstance(decision.get('args'), dict) else {}
+        step = self.step
+        recorder = self.recorder
         recorder.event('model', detail={'step': step, 'action': action})
-        if action not in ACTIONS:
-            recorder.event('tool_result', status='error', detail={'step': step, 'ok': False, 'error': '未知动作'})
-            messages += [{'role': 'assistant', 'content': _observation(decision)},
-                         {'role': 'user', 'content': 'observation: ' + _observation({'ok': False, 'error': '未知动作，可用动作：' + ', '.join(ACTIONS)})}]
-            save(step)
-            continue
+        if action not in self.actions:
+            recorder.event('tool_result', status='error',
+                           detail={'step': step, 'ok': False, 'error': '未知动作'})
+            self.observe(decision, {'ok': False, 'error': '未知动作，可用动作：' + ', '.join(self.actions)})
+            return None
         if action == 'need_input':
-            if step >= MAX_TOTAL_STEPS:break
+            if step >= MAX_TOTAL_STEPS:
+                return self.incomplete()
             question = str(args.get('question', ''))[:300]
-            messages.append({'role': 'assistant', 'content': _observation(decision)})
-            save(step)
+            self.messages.append({'role': 'assistant', 'content': _observation(decision)})
+            self.save()
             recorder.finish('needs_input', {'question': question, 'modelSteps': step})
             return {'runId': recorder.id, 'status': 'needs_input', 'question': question}
         if action == 'give_up':
@@ -195,28 +239,55 @@ async def run_agent(data, router, recorder, *, checkpoint=None, persist=None, pr
             return {'runId': recorder.id, 'status': 'gave_up', 'message': reason}
         recorder.event('tool_call', detail={'step': step, 'tool': action, 'args': args})
         try:
-            outcome = await toolbox.run(action, args)
+            if action == 'repair_plan':
+                self.reserve_repair()
+            outcome = await self.call_tool(action, args)
         except (ValueError, KeyError, TypeError, HTTPException) as error:
-            detail = getattr(error, 'detail', None) or str(error)
-            recorder.event('tool_result', status='error', detail={'step': step, 'ok': False, 'error': str(detail)[:300]})
-            messages += [{'role': 'assistant', 'content': _observation(decision)},
-                         {'role': 'user', 'content': 'observation: ' + _observation({'ok': False, 'error': str(detail)[:300]})}]
-            save(step)
-            continue
-        if action == 'propose_plan' and outcome['ok']:
-            trip, issues = outcome['trip'], outcome['issues']
-            validation = {'trip': snapshot(trip), 'issues': issues, 'metrics': outcome['summary']['metrics'],
-                          'summary': str(args.get('summary', ''))[:300], 'timeline': timeline(trip, outcome['routes']),
-                          'includedIds': [a.placeId for d in trip.days for a in d.activities if a.placeId in toolbox.candidates],
-                          'omittedIds': [id for id in data.candidateIds if not any(a.placeId == id for d in trip.days for a in d.activities)],
-                          'routeSources': sorted({r.get('source', 'unknown') for r in outcome['routes'].values()})}
-            recorder.event('tool_result', detail={'step': step, 'ok': True, 'summary': {'feasible': True}})
-            recorder.complete({'runId': recorder.id, 'status': 'completed', 'validation': validation, 'modelSteps': step})
-            return {'runId': recorder.id, 'status': 'completed', 'plan': validation, 'steps': step}
+            detail = str(getattr(error, 'detail', None) or error)[:300]
+            recorder.event('tool_result', status='error',
+                           detail={'step': step, 'ok': False, 'error': detail})
+            self.observe(decision, {'ok': False, 'error': detail})
+            return None
+        if action in ('propose_plan', 'repair_plan') and outcome['ok']:
+            return self.complete(action, args, outcome)
         recorder.event('tool_result', detail={'step': step, 'ok': outcome['ok'], 'summary': outcome['summary']})
-        messages += [{'role': 'assistant', 'content': _observation(decision)},
-                     {'role': 'user', 'content': 'observation: ' + _observation({'ok': outcome['ok'], 'summary': outcome['summary']})}]
-        save(step)
-    message = f'本轮 {MAX_STEPS} 步或累计 {MAX_TOTAL_STEPS} 步预算已用完，仍未给出可行方案'
-    recorder.finish('incomplete', {'message': message})
-    return {'runId': recorder.id, 'status': 'incomplete', 'message': message}
+        self.observe(decision, {'ok': outcome['ok'], 'summary': outcome['summary']})
+        return None
+
+    def complete(self, action, args, outcome):
+        trip = outcome['trip']
+        routes = outcome['routes']
+        visits = [activity.placeId for day in trip.days for activity in day.activities]
+        validation = {
+            'trip': snapshot(trip), 'issues': outcome['issues'], 'metrics': outcome['summary']['metrics'],
+            'summary': '约束求解器已找到并核验修复方案' if action == 'repair_plan' else str(args.get('summary', ''))[:300],
+            'timeline': timeline(trip, routes),
+            'includedIds': [id for id in visits if id in self.toolbox.candidates],
+            'omittedIds': [id for id in self.data.candidateIds if id not in visits],
+            'routeSources': sorted({route.get('source', 'unknown') for route in routes.values()}),
+        }
+        summary = {'feasible': True}
+        if action == 'repair_plan':
+            summary['search'] = outcome['summary']['search']
+        self.recorder.event('tool_result', detail={'step': self.step, 'ok': True, 'summary': summary})
+        self.recorder.complete({'runId': self.recorder.id, 'status': 'completed',
+                                'validation': validation, 'modelSteps': self.step})
+        return {'runId': self.recorder.id, 'status': 'completed', 'plan': validation, 'steps': self.step}
+
+    def incomplete(self):
+        message = f'本轮 {MAX_STEPS} 步或累计 {MAX_TOTAL_STEPS} 步预算已用完，仍未给出可行方案'
+        self.recorder.finish('incomplete', {'message': message})
+        return {'runId': self.recorder.id, 'status': 'incomplete', 'message': message}
+
+
+async def run_agent(data, router, recorder, *, checkpoint=None, persist=None, preferences=''):
+    """Keep the original entry point for already-created tasks."""
+    steps = AgentSteps(data, router, recorder, checkpoint=checkpoint,
+                       persist=persist, preferences=preferences)
+    while steps.step < steps.limit:
+        decision = await steps.decide()
+        if decision is not None:
+            result = await steps.act(decision)
+            if result is not None:
+                return result
+    return steps.incomplete()

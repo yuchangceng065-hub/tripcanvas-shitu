@@ -59,6 +59,8 @@ flowchart LR
 
 - 新增交互式行程推演、冲突修复解释、持久化情景分支比较、攻略原文追溯与批量选点、真实执行回放，见 [推演与导入说明](docs/planning-experiences.md)。
 
+- AI 对话入口使用 LangGraph、MCP 与持久检查点，具备独立 MCP 演示及 LangSmith SDK 评测，见 [Agent 技术栈](docs/agent-stack.md)。
+
 ## 未完成与已知边界
 
 - 自由需求已有模型提取、多轮澄清和地点确认；复杂表达覆盖仍需真实样本验证，已确认硬条件改变需重新确认。规则输入路径继续保留。

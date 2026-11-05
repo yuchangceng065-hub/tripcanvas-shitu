@@ -46,7 +46,17 @@ async def lifespan(app):
         app.state.http=client
         app.state.amap=AmapService(client,POIS,reserve_amap_usage,remember_place)
         app.state.router=RoutingGateway(Router(client,POIS),app.state.amap)
-        yield
+        from backend.agent_graph import graph_checkpointer
+        async with graph_checkpointer() as checkpointer:
+            app.state.graph_checkpointer = checkpointer
+            try:
+                yield
+            finally:
+                tasks = tuple(app.state.agent_tasks.values())
+                for task in tasks:
+                    task.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
     engine.dispose()
 app=FastAPI(title='拾途 TripCanvas API',version='1.0.0',lifespan=lifespan)
 ORIGINS=os.getenv('FRONTEND_ORIGINS','http://127.0.0.1:5173,http://localhost:5173').split(',')
