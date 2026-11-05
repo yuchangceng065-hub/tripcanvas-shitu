@@ -118,6 +118,10 @@ python3 -m venv .venv
 跨源部署需要调整 `FRONTEND_ORIGINS`、HTTPS 会话及反向代理；推荐把前端 `/api` 代理到 Python 服务，保持同源。
 
 
+## 检查点与迁移
+
+LangGraph 检查点表由库自动创建，不在 Alembic 中；备份/恢复与保留期见 [docs/checkpoints.md](docs/checkpoints.md)。
+
 ## 数据库迁移
 
 ```sh
@@ -170,7 +174,7 @@ npm run build
 - `backend/catalog.py`：Photon 搜索与地点目录。
 - `backend/routing.py`：路线契约与 OSRM 实现。
 - `backend/tests/`：后端自动化测试。
-- `docs/`：执行计划、能力清单、验证记录与部署说明。
+- `docs/`：执行计划、能力清单、验证记录、检查点运维与部署说明。
 
 ## 数据与署名
 

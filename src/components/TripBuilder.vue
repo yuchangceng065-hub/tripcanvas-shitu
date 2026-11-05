@@ -46,10 +46,12 @@ const evidence=computed(()=>{
  return labels
 })
 watch(()=>props.hasModel,value=>useModel.value=value)
-onMounted(async()=>{
- if(!props.loggedIn)return
+const prefsLoaded=ref(false)
+async function loadPreferences(){
+ if(prefsLoaded.value||!props.loggedIn)return
  try{
   const saved=await api('/preferences')
+  prefsLoaded.value=true
   if(saved&&Object.keys(saved).length){
    if(saved.pace)req.value.pace=saved.pace
    if(Array.isArray(saved.interests)&&saved.interests.length)req.value.interests=saved.interests
@@ -57,7 +59,9 @@ onMounted(async()=>{
    remembered.value=saved
   }
  }catch{}
-})
+}
+onMounted(loadPreferences)
+watch(()=>props.loggedIn,value=>{if(value)void loadPreferences()})
 function minutes(value:string){const [h,m]=value.split(':').map(Number);return h!*60+m!}
 function updateTime(event:Event,key:'start'|'end'|'returnBy'){const value=(event.target as HTMLInputElement).value;req.value[key]=value?minutes(value):null as never}
 function resetConversation(){conversationId.value='';conversationOpen.value=false;try{sessionStorage.removeItem(conversationKey)}catch{}}
