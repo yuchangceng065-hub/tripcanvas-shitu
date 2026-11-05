@@ -84,8 +84,12 @@ class PlanningToolClient:
         try:
             response = await self.session.call_tool(name, arguments)
             result = response.structuredContent
-            if response.isError or not isinstance(result, dict):
-                raise ValueError('工具参数或返回结构无法通过核验')
+            if response.isError:
+                texts = [getattr(item, 'text', '') for item in (response.content or [])]
+                message = '；'.join(text for text in texts if text).strip()[:300]
+                raise HTTPException(422, message or '工具执行失败，请调整参数')
+            if not isinstance(result, dict):
+                raise ValueError('工具返回结构无法通过核验')
             if 'statusCode' in result:
                 raise HTTPException(result['statusCode'], result['error'])
             success = result.get('ok', True)

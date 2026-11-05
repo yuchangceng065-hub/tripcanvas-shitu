@@ -1,7 +1,9 @@
 name: Postgres compatibility
 
-# Manual first: this job has not run yet in CI, so it stays opt-in until it is green once.
+# Runs on main now that the job has been green; manual dispatch stays available.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:

@@ -334,3 +334,11 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - 途中发现并修复：给 Facts 严格 schema 增加可选 `queries` 字段后 Groq 返回 400；改为独立的 `search_refine` 严格 schema 调用，并保留原有事实 schema。修复提交 `3d6b5c7`。
 - 测试：后端 171 项、前端 101 项、Ruff、构建通过。
 - 未做：真实浏览器点选、Agent 规划阶段 search/add 的线上强制触发、偏好设置页。
+
+### 2026-11-05：善后收口（CI、错误透传、冷启动、文档）
+
+- Postgres 兼容性工作流改为 `push: main` 自动触发（保留手动 dispatch）；README 增加 Postgres 徽章。
+- MCP 工具错误现在把工具返回的文本透传给 Agent（不再统一成“结构无法核验”），模型能看到“未知地点”等真实原因。
+- LangGraph Postgres 连接池改为最多 3 次退避重试，避免 Neon 冷启动导致应用启动失败；关闭时显式关池。
+- 统一文档测试口径为后端 171、前端 101；清理 `qa_*` 验收账号下的测试行程（账号本身暂无删除接口，保留）。
+- 测试：后端 171 项、前端 101 项、Ruff、构建通过。

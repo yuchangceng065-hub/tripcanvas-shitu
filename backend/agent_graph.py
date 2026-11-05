@@ -1,4 +1,5 @@
 """LangGraph orchestration for the site's existing conversation API."""
+import asyncio
 from contextlib import asynccontextmanager
 from typing import TypedDict
 
@@ -22,15 +23,28 @@ from backend.planning import AlternativesBody
 async def graph_checkpointer():
     if engine.dialect.name == 'postgresql':
         url = engine.url.set(drivername='postgresql').render_as_string(hide_password=False)
-        async with AsyncConnectionPool(
-            url, min_size=1, max_size=2,
-            kwargs={'autocommit': True, 'row_factory': dict_row, 'prepare_threshold': None,
-                    'connect_timeout': 10},
-        ) as pool:
-            await pool.wait(timeout=15)
-            saver = AsyncPostgresSaver(pool)
-            await saver.setup()
+        pool = None
+        for attempt in range(3):
+            candidate = AsyncConnectionPool(
+                url, min_size=1, max_size=2, open=False,
+                kwargs={'autocommit': True, 'row_factory': dict_row, 'prepare_threshold': None,
+                        'connect_timeout': 10},
+            )
+            try:
+                await candidate.open(wait=True, timeout=15)
+                pool = candidate
+                break
+            except Exception:
+                await candidate.close()
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(1.5 * (attempt + 1))
+        saver = AsyncPostgresSaver(pool)
+        await saver.setup()
+        try:
             yield saver
+        finally:
+            await pool.close()
     else:
         database = engine.url.database
         path = f'{database}.agent.db' if database and database != ':memory:' else ':memory:'
