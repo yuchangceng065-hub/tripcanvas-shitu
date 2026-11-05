@@ -24,7 +24,6 @@ class MentionFact(BaseModel):
     text:str=Field(min_length=1,max_length=100)
     role:Literal['visit','origin','destination']
     required:bool
-    queries:list[str]=Field(default_factory=list,max_length=3)
 
 class Facts(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
@@ -59,7 +58,6 @@ INTAKE_SYSTEM='''你负责理解杭州1—3日旅行需求，只返回规定的J
 mode仅支持walk步行、drive自驾接驳；地铁等不支持时留null并说明。用户要其他城市时保留该城市，不擅自改杭州。
 start/end/returnBy以当天分钟数表示，下午五点半=1050；未写开始/结束时间填null。未明确的步行预算填null。
 mentions最多6项：只给用于真实搜索的地点名称/关键词和visit/origin/destination角色。多校区、区域和同名地点不能编造具体入口；交给搜索和用户选择。
-每个mention可给0—2个queries作为补充搜索词，用于多校区、同名或区域歧义（例如“浙工大”→浙江工业大学朝晖校区/屏峰校区）；不能编造具体入口或商户。
 只有用户说“顺路、可选、时间够再去”的visit才required=false，其他明确想去的visit为true；起终点required=true。
 用户只给兴趣时，可给1—3个“杭州博物馆/西湖附近咖啡”这样的搜索关键词，不编造具体商户。明确不去或替换的旧地点从最新mentions移除。
 notes只说明实际未能核验的偏好/歧义，例如台阶、营业、票价，不能宣称已满足。不要编造POI ID、坐标或道路时间。'''
@@ -257,7 +255,7 @@ class RefineQuery(BaseModel):
 
 class RefineOutput(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
-    queries:list[RefineQuery]=Field(default_factory=list,max_length=2)
+    queries:list[RefineQuery]
 
 REFINE_SYSTEM='''你是地点搜索助手。给定用户的地点提及和已有候选，判断是否需要更精确的搜索词继续核对（多校区、同名、区域歧义）。
 只返回 {"queries":[{"text":"原提及","query":"更精确的搜索词"}]}，不需要继续就返回 {"queries":[]}。每轮最多两条，不能编造地点 ID、坐标、入口或商户。'''
@@ -320,8 +318,7 @@ async def ground_places(state, services, recorder, persist, search_places=None):
         key=hashlib.sha256((fact['role']+'\0'+fact['text']).encode()).hexdigest()[:16]
         if any(m['key']==key for m in mentions):continue
         mention={**fact,'key':key,'candidates':previous.get(key,{}).get('candidates',[])}
-        planned=[q for q in fact.get('queries',[]) if isinstance(q,str) and q.strip()][:2]
-        queries=list(dict.fromkeys([*planned,fact['text']]))
+        queries=[fact['text']]
         if not mention['candidates']:
             for query in queries:
                 if state.get('searchCount',0)>=12:break

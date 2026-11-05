@@ -203,27 +203,6 @@ def test_uncertain_transport_and_explicit_constraint_cancellation_are_not_guesse
     assert merged['people'] is None and merged['mode'] is None and merged['returnBy'] is None
     assert not any(m['role']=='destination' for m in merged['mentions'])
 
-def test_ground_places_searches_model_planned_queries_and_dedupes():
-    import asyncio
-    from backend.conversation import ground_places
-    state={'facts':{'mentions':[{'text':'浙工大','role':'visit','required':True,
-             'queries':['浙江工业大学 朝晖校区','浙江工业大学 屏峰校区','浙江工业大学 朝晖校区']}]},'mentions':[]}
-    calls=[]
-    async def search(query):
-        calls.append(query)
-        if '朝晖' in query:return [POIS['museum']]
-        if '屏峰' in query:return [POIS['silk']]
-        return []
-    events=[]
-    class Recorder:
-        def event(self,name,**kwargs):events.append((name,kwargs.get('detail')))
-    asyncio.run(ground_places(state,None,Recorder(),lambda:None,search))
-    assert calls==['浙江工业大学 朝晖校区','浙江工业大学 屏峰校区','浙工大']
-    ids=[candidate['id'] for candidate in state['mentions'][0]['candidates']]
-    assert ids==['museum','silk']
-    searches=[detail for name,detail in events if name=='place_search']
-    assert len(searches)==3 and all('query' in detail for detail in searches)
-
 def test_refine_places_observes_candidates_and_searches_again(monkeypatch):
     import asyncio
     from backend.conversation import refine_places
