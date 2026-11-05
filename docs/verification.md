@@ -321,3 +321,16 @@ Render Free 服务 srv-dbl2b2t9fdbs73clvji0 已创建，API 为 https://tripcanv
 - `/planner/agent` 现在走 LangGraph（`engine=langgraph`），与对话规划共用检查点、MCP 工具和事件；新增 `candidate_added` 事件。
 - 测试：后端 172 项、前端 101 项、Ruff、构建通过；覆盖搜索→加入→方案包含、未搜索地点拒绝、候选白名单扩容。
 - 已知小问题：MCP 工具错误在客户端被概括为“工具参数或返回结构无法通过核验”，模型能看到失败但拿不到原始原因；后续应透传 statusCode/error。
+
+### 2026-11-05：线上真实验收（搜索迭代、偏好记忆、检查点）
+
+- 部署提交 `3d6b5c7`；CI 41981556988、Postgres 41981566627 通过。
+- 先用 QA 账号确认一份步行行程（pace=relaxed、interests=咖啡、walkBudgetKm=15），`GET /preferences` 立即返回这三项。
+- 新开对话“2026-11-14 去杭州一天，两个人，步行，想去浙工大看看，喜欢咖啡，17:30 前到杭州东站”：
+  - 初始搜索后对“浙工大”“杭州东站”触发 2 轮 `search_refine`，共 4 次真实搜索；浙工大返回朝晖/屏峰/假山等 5 个真实候选，东站返回 4 个入口候选。
+  - 选择朝晖校区与杭州东站、补“17:30、两人、步行”后进入 review；确认后完成规划。
+  - 最终 `engine=langgraph`、3 个模型步、`returnBy=1050`（17:30）、2 个地点；事件含 7 次 MCP（4 search、2 validate、1 route）、2 次 `graph_pause` 与 2 次 `graph_resume`。
+  - 新任务未再提“咖啡/轻松/15 km”，最终 requirements 仍带入 `pace=relaxed`、`interests=[咖啡]`、`walkBudgetKm=15`，说明软偏好跨任务注入生效；必去与返程仍来自本次确认。
+- 途中发现并修复：给 Facts 严格 schema 增加可选 `queries` 字段后 Groq 返回 400；改为独立的 `search_refine` 严格 schema 调用，并保留原有事实 schema。修复提交 `3d6b5c7`。
+- 测试：后端 171 项、前端 101 项、Ruff、构建通过。
+- 未做：真实浏览器点选、Agent 规划阶段 search/add 的线上强制触发、偏好设置页。
