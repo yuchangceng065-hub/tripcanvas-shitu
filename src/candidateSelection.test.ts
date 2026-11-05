@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest'
-import {candidateSelection,mentionKey,type Mention} from './candidateSelection'
+import {candidateSelection,mentionKey,mergeImportedOptional,type Mention} from './candidateSelection'
 const visit:Mention={text:'浙江工业大学',role:'visit'}
 const other:Mention={text:'另一个提及',role:'visit'}
 it('改选校区只保留新选择，反复切换不累积',()=>{
@@ -19,3 +19,6 @@ it('同名起点和游览提及分离，起终点不重复加入游览候选',()
  expect(candidateSelection(['A'],[visit,origin],{[mentionKey(visit)]:'A'},['A'])).toEqual([])
 })
 it('重新解析清空提及选择后，只保留手动候选',()=>expect(candidateSelection(['manual'],[visit],{},[])).toEqual(['manual']))
+it('攻略可选不降级已有必去，新必去升级已有可选',()=>{
+ expect(mergeImportedOptional(['q','m'],['m'],['q','m','s'],['q','s'])).toEqual(['s'])
+})

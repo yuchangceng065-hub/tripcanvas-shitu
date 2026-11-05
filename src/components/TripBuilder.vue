@@ -10,14 +10,14 @@ import {clone,places,placeById,registerPlaces,time,schedule,type Requirements,ty
 import {api,confirmTrip,beginConversation} from '../api'
 import {walkingKm,type RoadRoute} from '../routes'
 import {ApiError} from '../apiError'
-import {candidateSelection,mentionKey} from '../candidateSelection'
+import {candidateSelection,mentionKey,mergeImportedOptional} from '../candidateSelection'
 const props=defineProps<{loggedIn:boolean;hasModel:boolean}>()
 const emit=defineEmits<{created:[trip:Trip];login:[]}>()
 type Role='visit'|'destination'|'origin'
 interface Mention {text:string;role:Role;candidates:Place[];error?:string}
 interface Parsed {requirements:Partial<Requirements>;evidence:Record<string,unknown>;missing:string[];mentions:Mention[];suggestions:Place[];notes:string[];search_source:string}
 const guideOpen=ref(false)
-function importPlaces(items:Place[],optional:string[]){for(const p of items)choose(p);optionalIds.value=[...new Set([...optionalIds.value,...optional])];guideOpen.value=false}
+function importPlaces(items:Place[],optional:string[]){const merged=mergeImportedOptional(candidateIds.value,optionalIds.value,items.map(p=>p.id),optional);for(const p of items)choose(p);optionalIds.value=merged.filter(id=>candidateIds.value.includes(id));guideOpen.value=false}
 const step=ref(0),intent=ref(''),title=ref('我的杭州慢游'),error=ref(''),busy=ref(false),parsing=ref(false),useModel=ref(props.hasModel),agentOpen=ref(false)
 const conversationId=ref(''),conversationOpen=ref(false),conversationBusy=ref(false)
 const recentConversations=ref<{runId:string;title:string;status:string}[]>([])

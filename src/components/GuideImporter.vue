@@ -16,12 +16,12 @@ function selectPin(id:string){mapPin.value=id;const hit=result.value?.mentions.f
 const before=computed(()=>result.value?.text.slice(0,active.value?.start??0)||'')
 const after=computed(()=>result.value?.text.slice(active.value?.end??0)||'')
 function setResult(value:Import){result.value=value;chosen.value={};active.value=value.mentions[0]??null;registerPlaces(value.mentions.flatMap(m=>m.candidates))}
-async function loadRecent(){if(props.loggedIn)try{recent.value=await api('/planner/imports')}catch{}}
+async function loadRecent(){const ticket=generation;if(props.loggedIn)try{const data=await api('/planner/imports');if(ticket===generation)recent.value=data}catch{}}
 onMounted(loadRecent)
 watch(()=>props.loggedIn,value=>{generation++;if(value)void loadRecent();else{result.value=null;recent.value=[];text.value='';chosen.value={};active.value=null}})
 async function extract(){if(!props.loggedIn){emit('login');return}const ticket=++generation;busy.value=true;error.value='';result.value=null
  try{const data=await api('/planner/import-guide','POST',{text:text.value});if(ticket!==generation)return;setResult(data);await loadRecent()}catch(e){if(ticket===generation)error.value=(e as Error).message}finally{if(ticket===generation)busy.value=false}}
-async function restore(){if(!restored.value)return;busy.value=true;error.value='';try{const run=await api('/runs/'+restored.value);setResult({...run.import,runId:restored.value});text.value=run.import.text}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
+async function restore(){if(!restored.value)return;const ticket=++generation;busy.value=true;error.value='';try{const run=await api('/runs/'+restored.value);if(ticket!==generation)return;setResult({...run.import,runId:restored.value});text.value=run.import.text}catch(e){if(ticket===generation)error.value=(e as Error).message}finally{if(ticket===generation)busy.value=false}}
 function confirm(){emit('choose',selected.value.map(x=>x.place),selected.value.filter(x=>x.optional).map(x=>x.place.id))}
 </script>
 <template>
