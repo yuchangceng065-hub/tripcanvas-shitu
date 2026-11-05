@@ -118,6 +118,6 @@ __all__ = ['app', 'Base', 'engine', 'SessionLocal', 'User', 'AuthSession', 'Trip
            'travel', 'verify_proposal', 'draft_order', 'model_json', 'parse_model_json', 'model_options',
            'amap_enabled', 'model_api_key', 'HTTPException']
 
-from backend.routers import auth,geo,planner,system,trips,experiences  # noqa: E402
-for module in (system,auth,trips,planner,geo,experiences):
+from backend.routers import auth,experiences,geo,planner,preferences,system,trips  # noqa: E402
+for module in (system,auth,trips,planner,geo,experiences,preferences):
     app.include_router(module.router)

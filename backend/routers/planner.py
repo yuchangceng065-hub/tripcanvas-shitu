@@ -1,9 +1,10 @@
-import asyncio,json,os,time,uuid
+import asyncio,json,logging,os,time,uuid
 from fastapi import APIRouter,Depends,HTTPException,Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from backend.agent import validate_agent_request
 from backend.conversation import create_session,load_session,public_session,claim_reply,schedule,recent_sessions
+from backend.preferences import load_preferences, remember_from_requirements
 from backend.alternatives import PlanSearch
 from backend.places import PLACES,POIS
 from backend.planning import AlternativesBody,DraftBody,evaluate,make_trip
@@ -61,6 +62,8 @@ async def confirm(data:ConfirmBody,request:Request,user:User=Depends(current_use
     source='amap' if amap_enabled() else 'osrm'
     if hard:raise HTTPException(422,detail={'code':'infeasible','issues':found,'routes':routes,'route_source':source})
     revision=persist_trip(s,user,candidate)
+    try:remember_from_requirements(user.id,candidate.requirements)
+    except Exception:logging.getLogger('tripcanvas.preferences').warning('failed to remember soft preferences',exc_info=False)
     return {'trip':snapshot(candidate),'revision':revision,'issues':found,'route_source':source,'idempotent':False}
 
 @router.post('/api/v1/planner/requirements')
@@ -145,7 +148,7 @@ async def begin_conversation(data:ConversationStart,request:Request,user:User=De
     reserve_user_daily(user.id,'agent',int(os.getenv('PLAN_AGENT_DAILY_LIMIT','6')))
     recorder=RunRecorder(user.id,'',0,'conversation')
     state={'engine':'langgraph','phase':'intake','title':data.title,'turns':[{'role':'user','text':data.text.strip()}],
-           'interpret':True,'facts':None,'mentions':[],'choices':{},'replies':0}
+           'interpret':True,'facts':None,'mentions':[],'choices':{},'replies':0,'preferences':load_preferences(user.id)}
     create_session(recorder,user.id,state);schedule(request.app.state,recorder,1,state)
     return {'runId':recorder.id,'status':'running'}
 

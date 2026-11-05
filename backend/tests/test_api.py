@@ -576,3 +576,28 @@ def test_suggest_records_model_run_phases(client,monkeypatch):
     assert proposal.get('runId'),proposal
     events=client.get('/api/v1/runs/'+proposal['runId']).json()['events']
     assert [event['phase'] for event in events]==['model_started','validation','completed']
+
+def test_preferences_roundtrip_validation_and_confirm_learning(client,monkeypatch):
+    register(client)
+    saved=client.put('/api/v1/preferences',json={'pace':'relaxed','interests':['咖啡'],'walkBudgetKm':4})
+    assert saved.status_code==200,saved.text
+    assert client.get('/api/v1/preferences').json()=={'pace':'relaxed','interests':['咖啡'],'walkBudgetKm':4.0}
+    assert client.put('/api/v1/preferences',json={'pace':'turbo'}).status_code==422
+    t=trip();t['requirements']={'city':'杭州','startDate':'2026-11-07','days':1,'people':2,'mode':'walk',
+        'start':570,'end':1110,'pace':'balanced','interests':['博物馆'],'walkBudgetKm':2.5}
+    async def roads(body):return fast_roads(body)
+    monkeypatch.setattr(app.state.router,'route',roads)
+    assert client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0}).status_code==200
+    learned=client.get('/api/v1/preferences').json()
+    assert learned['pace']=='balanced' and learned['interests']==['博物馆'] and learned['walkBudgetKm']==2.5
+    assert client.delete('/api/v1/preferences').status_code==200
+    assert client.get('/api/v1/preferences').json()=={}
+
+def test_preferences_fill_only_missing_soft_fields():
+    from backend.preferences import apply_preferences
+    facts={'pace':None,'interests':[],'walkBudgetKm':None}
+    result=apply_preferences(facts,{'pace':'relaxed','interests':['咖啡'],'walkBudgetKm':4})
+    assert result=={'pace':'relaxed','interests':['咖啡'],'walkBudgetKm':4}
+    explicit=apply_preferences({'pace':'full','interests':['博物馆'],'walkBudgetKm':None},
+                               {'pace':'relaxed','interests':['咖啡'],'walkBudgetKm':4})
+    assert explicit['pace']=='full' and explicit['interests']==['博物馆'] and explicit['walkBudgetKm']==4

@@ -10,6 +10,7 @@ from sqlalchemy import update,select
 from backend.db import PlanningSession,SessionLocal
 from backend.model_gateway import model_json_messages
 from backend.model_metrics import current_metrics,empty_metrics
+from backend.preferences import apply_preferences
 from backend.planning import AlternativesBody,Requirements
 from backend.agent import run_agent,validate_agent_request,MAX_TOTAL_STEPS
 from backend.store import remember_place
@@ -23,6 +24,7 @@ class MentionFact(BaseModel):
     text:str=Field(min_length=1,max_length=100)
     role:Literal['visit','origin','destination']
     required:bool
+    queries:list[str]=Field(default_factory=list,max_length=3)
 
 class Facts(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
@@ -57,6 +59,7 @@ INTAKE_SYSTEM='''你负责理解杭州1—3日旅行需求，只返回规定的J
 mode仅支持walk步行、drive自驾接驳；地铁等不支持时留null并说明。用户要其他城市时保留该城市，不擅自改杭州。
 start/end/returnBy以当天分钟数表示，下午五点半=1050；未写开始/结束时间填null。未明确的步行预算填null。
 mentions最多6项：只给用于真实搜索的地点名称/关键词和visit/origin/destination角色。多校区、区域和同名地点不能编造具体入口；交给搜索和用户选择。
+每个mention可给0—2个queries作为补充搜索词，用于多校区、同名或区域歧义（例如“浙工大”→浙江工业大学朝晖校区/屏峰校区）；不能编造具体入口或商户。
 只有用户说“顺路、可选、时间够再去”的visit才required=false，其他明确想去的visit为true；起终点required=true。
 用户只给兴趣时，可给1—3个“杭州博物馆/西湖附近咖啡”这样的搜索关键词，不编造具体商户。明确不去或替换的旧地点从最新mentions移除。
 notes只说明实际未能核验的偏好/歧义，例如台阶、营业、票价，不能宣称已满足。不要编造POI ID、坐标或道路时间。'''
@@ -233,11 +236,12 @@ async def understand(state,recorder,persist):
             try:
                 output=await model_json_messages([{'role':'system','content':INTAKE_SYSTEM},
                     {'role':'user','content':json.dumps({'today':str(datetime.now(ZoneInfo('Asia/Shanghai')).date()),
-                        'previousFacts':state.get('facts'),'conversation':state['turns']},ensure_ascii=False)}],
+                        'previousFacts':state.get('facts'),'conversation':state['turns'],'userPreferences':state.get('preferences') or {}},ensure_ascii=False)}],
                     max_tokens=2200,response_format=fact_format())
                 facts=Facts.model_validate(output).model_dump()
                 latest=next(turn['text'] for turn in reversed(state['turns']) if turn['role']=='user')
                 facts=merge_facts(state.get('facts'),facts,latest,datetime.now(ZoneInfo('Asia/Shanghai')).date())
+                facts=apply_preferences(facts,state.get('preferences') or {})
                 state['facts']=facts;state['interpret']=False
                 break
             except ValueError:
@@ -251,17 +255,26 @@ async def ground_places(state, services, recorder, persist, search_places=None):
         key=hashlib.sha256((fact['role']+'\0'+fact['text']).encode()).hexdigest()[:16]
         if any(m['key']==key for m in mentions):continue
         mention={**fact,'key':key,'candidates':previous.get(key,{}).get('candidates',[])}
-        if not mention['candidates'] and state.get('searchCount',0)<12:
-            state['searchCount']=state.get('searchCount',0)+1;persist()
-            recorder.event('place_search',detail={'count':state['searchCount']})
-            try:
-                if search_places is None:
-                    from backend.amap import enabled
-                    searcher = services.amap if enabled() else services.search
-                    mention['candidates'] = [remember_place(p) for p in (await searcher.search(fact['text']))[:3]]
-                else:
-                    mention['candidates'] = await search_places(fact['text'])
-            except HTTPException:mention['error']='地点搜索暂不可用，可稍后补充或换一个名称。'
+        planned=[q for q in fact.get('queries',[]) if isinstance(q,str) and q.strip()][:2]
+        queries=list(dict.fromkeys([*planned,fact['text']]))
+        if not mention['candidates']:
+            for query in queries:
+                if state.get('searchCount',0)>=12:break
+                state['searchCount']=state.get('searchCount',0)+1;persist()
+                recorder.event('place_search',detail={'count':state['searchCount'],'query':query})
+                try:
+                    if search_places is None:
+                        from backend.amap import enabled
+                        searcher = services.amap if enabled() else services.search
+                        found=[remember_place(p) for p in (await searcher.search(query))[:3]]
+                    else:
+                        found=await search_places(query)
+                    known={candidate['id'] for candidate in mention['candidates']}
+                    for place in found:
+                        if place['id'] not in known:
+                            mention['candidates'].append(place);known.add(place['id'])
+                except HTTPException:mention['error']='地点搜索暂不可用，可稍后补充或换一个名称。'
+                if len(mention['candidates'])>=3:break
         if not mention['candidates']:mention['error']=mention.get('error','未找到可确认的结果，请补充名称或校区。')
         mentions.append(mention)
     state['mentions']=mentions

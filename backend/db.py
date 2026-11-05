@@ -143,3 +143,10 @@ class ScenarioBranch(Base):
     label: Mapped[str] = mapped_column(String)
     snapshot: Mapped[str] = mapped_column(Text)
     created: Mapped[float] = mapped_column(Float)
+
+
+class UserPreference(Base):
+    __tablename__ = 'user_preferences'
+    owner: Mapped[str] = mapped_column(String, primary_key=True)
+    data: Mapped[str] = mapped_column(Text)
+    updated: Mapped[float] = mapped_column(Float)

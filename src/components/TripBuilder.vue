@@ -32,6 +32,7 @@ const optionalIds=ref<string[]>([]),comparison=ref<Comparison|null>(null),select
 watch(candidateIds,ids=>optionalIds.value=optionalIds.value.filter(id=>ids.includes(id)))
 interface RepairOption {action:string;activityId?:string;minutes?:number;day?:number}
 interface DraftIssue {message:string;severity?:'error'|'warning';code?:string;options?:RepairOption[]}
+const remembered=ref<Record<string,unknown>>({})
 const draft=ref<{trip:Trip;source:string;issues:DraftIssue[];warnings:string[];routes?:Record<string,RoadRoute>}|null>(null)
 const draftErrors=computed(()=>draft.value?.issues.filter(issue=>issue.severity!=='warning')??[])
 const draftWarnings=computed(()=>draft.value?.issues.filter(issue=>issue.severity==='warning')??[])
@@ -45,6 +46,18 @@ const evidence=computed(()=>{
  return labels
 })
 watch(()=>props.hasModel,value=>useModel.value=value)
+onMounted(async()=>{
+ if(!props.loggedIn)return
+ try{
+  const saved=await api('/preferences')
+  if(saved&&Object.keys(saved).length){
+   if(saved.pace)req.value.pace=saved.pace
+   if(Array.isArray(saved.interests)&&saved.interests.length)req.value.interests=saved.interests
+   if(typeof saved.walkBudgetKm==='number')req.value.walkBudgetKm=saved.walkBudgetKm
+   remembered.value=saved
+  }
+ }catch{}
+})
 function minutes(value:string){const [h,m]=value.split(':').map(Number);return h!*60+m!}
 function updateTime(event:Event,key:'start'|'end'|'returnBy'){const value=(event.target as HTMLInputElement).value;req.value[key]=value?minutes(value):null as never}
 function resetConversation(){conversationId.value='';conversationOpen.value=false;try{sessionStorage.removeItem(conversationKey)}catch{}}
@@ -199,6 +212,7 @@ async function save(){
  <div class="trip-builder">
   <span class="eyebrow">YOUR HANGZHOU JOURNEY STARTS HERE</span>
   <h2>{{['这次，想怎么玩杭州？','选定，真正想去的地方。','看看这份杭州草案。'][step]}}</h2>
+  <p v-if="Object.keys(remembered).length" class="form-hint">已带入上次偏好：{{ remembered.pace==='relaxed'?'轻松':remembered.pace==='full'?'充实':'适中' }}{{ Array.isArray(remembered.interests)&&remembered.interests.length?' · '+remembered.interests.join(' / '):'' }}{{ remembered.walkBudgetKm?' · 步行 '+remembered.walkBudgetKm+' km':'' }}（可直接修改）</p>
   <div class="builder-steps"><span v-for="(label,i) in ['确认需求','选择地点','预览保存']" :key="label" :class="{active:step===i}">{{i+1}} · {{label}}</span></div>
 
   <template v-if="step===0">
