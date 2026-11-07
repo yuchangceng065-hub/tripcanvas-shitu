@@ -1,0 +1,13 @@
+# The RAG lab core needs NO third-party packages (standard library only).
+# The items below are OPTIONAL adapters; install only what you actually use.
+
+# Remote embedding / chat adapters (the core already ships a local TF-IDF
+# embedder and an extractive generator).
+# httpx>=0.27
+
+# Real Redis semantic cache; without it the pipeline uses the in-process
+# LRU backend with identical behaviour.
+# redis>=5.0
+
+# Running the regression tests (already present in the repository venv).
+# pytest>=8.0

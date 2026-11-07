@@ -38,6 +38,9 @@ if [ "${1:-}" = "--quick" ]; then
   "$PY" scripts/evaluate_agent.py >/dev/null && echo "agent cases passed"
   step "Real task suite (coverage + four quadrants)"
   "$PY" scripts/evaluate_real_tasks.py
+  step "RAG lab (independent exercise project)"
+  "$PY" -m pytest labs/rag-qa/tests -q --basetemp="${BASETEMP}-rag"
+  "$PY" labs/rag-qa/evaluate.py --fail-on-regression
   step "Migration from empty database"
   DATABASE_URL="sqlite:////tmp/tc-migration-${STAMP}.db" "$PY" -m alembic upgrade head
   step "Whitespace check"
@@ -64,6 +67,10 @@ step "Agent evaluation (3 fixed cases)"
 
 step "Real task suite (coverage + four quadrants)"
 "$PY" scripts/evaluate_real_tasks.py
+
+step "RAG lab (independent exercise project, separate from the four evaluations)"
+"$PY" -m pytest labs/rag-qa/tests -q --basetemp="${BASETEMP}-rag"
+"$PY" labs/rag-qa/evaluate.py --fail-on-regression
 
 step "Migration from empty database"
 DATABASE_URL="sqlite:////tmp/tc-migration-${STAMP}.db" "$PY" -m alembic upgrade head
