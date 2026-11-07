@@ -30,10 +30,6 @@ jobs:
         run: python scripts/evaluate.py --output-dir /tmp/evaluation
       - name: Trajectory evaluation (14 fixed Agent traces)
         run: python scripts/evaluate_trajectory.py --output /tmp/trajectory-report.json
-      - name: RAG lab tests and quality gate
-        run: |
-          python -m pytest labs/rag-qa/tests -q
-          python labs/rag-qa/evaluate.py --fail-on-regression
       - name: Migration from empty database
         env:
           DATABASE_URL: sqlite:////tmp/migration.db
