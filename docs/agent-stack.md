@@ -35,6 +35,6 @@ MCP 演示用独立进程与 stdio 连接，可发现 5 个工具、核验方案
 
 评测默认在本地执行，使用合成道路和脚本模型。加 `--baseline` 可对比同一夹具版本的历史报告。已有 LangSmith 账号时，可在环境中设置 `LANGSMITH_API_KEY` 后显式加 `--upload`，将合成示例和实验结果写入 LangSmith。
 
-## 简历表述
+## 能力概述
 
 基于 LangGraph、PostgreSQL 和 FastAPI 编排多轮旅行规划 Agent，支持人工确认、检查点恢复和 SSE 执行轨迹。用 MCP 封装地点与道路工具及有界约束求解，使用 LangSmith SDK 和 pytest 回归验证候选边界、返程约束与写入幂等。

@@ -84,7 +84,7 @@
 | QA 账号累积且无注销接口 | `scripts/cleanup_qa_accounts.py`：默认 dry-run，`--apply --yes` 才执行，`DATABASE_URL` 由操作者提供；临时库验证只删前缀账号及其所属行 |
 | 外部整体评估文档过期 | `拾途-整体评估-2026-11-06.md` §9 按当前数字与状态重算评分 |
 
-当前数字以 `README.md`「当前状态」段与 `docs/trajectory-evaluation.md` 为准；`docs/verification.md`、`docs/capability-matrix.md`、`docs/agent.md`、`docs/resume.md` 中的旧数字是各次验收当时的快照，不代表当前状态。
+当前数字以 `README.md`「当前状态」段与 `docs/trajectory-evaluation.md` 为准；`docs/verification.md`、`docs/capability-matrix.md`、`docs/agent.md`、`docs/project-overview.md` 中的旧数字是各次验收当时的快照，不代表当前状态。
 
 ## 8. 2026-11-07 第四轮（用量快照落库与运行时审计）
 
