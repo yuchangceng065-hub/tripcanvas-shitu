@@ -62,7 +62,11 @@ async def save_branch(data:BranchBody,request:Request,user:User=Depends(current_
             raise HTTPException(422,'分支不能解除必去、固定安排、返程或结束约束')
     result=await checked(data.trip,request.app.state.router)
     if not result['feasible']:raise HTTPException(422,{'message':'分支仍有冲突，请先修复','issues':result['issues']})
-    id=str(uuid.uuid4());trip=data.trip.model_copy(deep=True);trip.id=id;trip.revision=1;trip.title=(data.trip.title+' · '+data.label)[:80]
+    # A branch is a derived scenario, not an authoritative confirmation.
+    # `checked()` re-runs roads/constraints, but only /planner/confirm may stamp
+    # a version as verified, so never inherit the source trip's status.
+    id=str(uuid.uuid4());trip=data.trip.model_copy(deep=True,update={'validationStatus':'draft'})
+    trip.id=id;trip.revision=1;trip.title=(data.trip.title+' · '+data.label)[:80]
     try:
         with SessionLocal.begin() as db:
             # Recheck revision after external I/O; source is never overwritten.
@@ -92,7 +96,7 @@ async def preview_branch(id:str,request:Request,user:User=Depends(current_user))
     with SessionLocal() as db:
         row=db.get(ScenarioBranch,id)
         if not row or row.owner!=user.id:raise HTTPException(404,'分支不存在')
-        trip=Trip.model_validate_json(row.snapshot)
+        trip=Trip.model_validate_json(row.snapshot).model_copy(update={'validationStatus':'draft'})
     return await checked(trip,request.app.state.router)
 
 @router.post('/branches/{id}/open')
@@ -101,7 +105,9 @@ async def open_branch(id:str,request:Request,user:User=Depends(current_user)):
     with SessionLocal() as db:
         row=db.get(ScenarioBranch,id)
         if not row or row.owner!=user.id:raise HTTPException(404,'分支不存在')
-        trip=Trip.model_validate_json(row.snapshot)
+        # Historic branch rows may still carry a status copied from a verified
+        # source. Opening a branch never goes through /planner/confirm.
+        trip=Trip.model_validate_json(row.snapshot).model_copy(update={'validationStatus':'draft'})
         existing=db.get(TripRow,id)
         if existing:
             if existing.owner!=user.id:raise HTTPException(404,'旅行不存在')

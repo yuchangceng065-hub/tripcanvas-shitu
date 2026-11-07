@@ -108,6 +108,10 @@ async def run_conversation_graph(services, recorder, version, session, persist):
 
     async def choose(_state):
         enter('choose_action')
+        violation = steps.guard_violation()
+        if violation:
+            result = steps.terminate()
+            return {'status': result['status'], 'next_node': END}
         if steps.step >= steps.limit:
             result = steps.incomplete()
             return {'status': result['status'], 'next_node': END}

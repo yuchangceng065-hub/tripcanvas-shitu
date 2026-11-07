@@ -1,0 +1,160 @@
+{
+  "suite": "trajectory-eval/v1",
+  "description": "Fixed synthetic Agent trajectories. Positive cases must pass; negative cases inject one specific process or outcome violation and must be rejected. expectedPass is a human label used to check the evaluator itself.",
+  "defaults": {
+    "expect": {
+      "terminal": "completed",
+      "allowedTools": ["route_day", "validate_plan", "propose_plan", "compare_plans", "need_input"],
+      "allowedPlaceIds": ["quyuan", "museum", "station", "art"],
+      "requiredPlaceIds": ["quyuan", "museum"],
+      "maxSteps": 6,
+      "maxToolCalls": 6,
+      "expectProposal": true,
+      "days": 1,
+      "requireValidationBeforeProposal": true
+    },
+    "events": [
+      {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "route_day"}},
+      {"seq": 2, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "route_day", "args": {"days": [["quyuan", "museum"]]}}},
+      {"seq": 3, "phase": "tool_result", "status": "ok", "detail": {"step": 1, "ok": true, "summary": "道路可用"}},
+      {"seq": 4, "phase": "model", "status": "ok", "detail": {"step": 2, "action": "propose_plan"}},
+      {"seq": 5, "phase": "tool_call", "status": "ok", "detail": {"step": 2, "tool": "propose_plan", "args": {"days": [["quyuan", "museum"]], "summary": "方案"}}},
+      {"seq": 6, "phase": "tool_result", "status": "ok", "detail": {"step": 2, "ok": true, "summary": "已核验"}},
+      {"seq": 7, "phase": "completed", "status": "ok", "detail": {"steps": 8}}
+    ],
+    "result": {"status": "completed", "written": false, "plan": {"days": [["quyuan", "museum"]]}}
+  },
+  "cases": [
+    {"id": "T01", "title": "正常完成：路线核验后提出方案", "split": "development", "expectedPass": true, "violation": null},
+
+    {"id": "T02", "title": "反问后从检查点恢复并完成", "split": "regression", "expectedPass": true, "violation": null,
+     "events": [
+       {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "route_day"}},
+       {"seq": 2, "phase": "graph_node", "status": "ok", "detail": {"node": "understand"}},
+       {"seq": 3, "phase": "graph_pause", "status": "ok", "detail": {"status": "needs_input"}},
+       {"seq": 4, "phase": "graph_resume", "status": "ok", "detail": {"engine": "langgraph"}},
+       {"seq": 5, "phase": "tool_call", "status": "ok", "detail": {"step": 2, "tool": "route_day", "args": {"days": [["quyuan", "museum"]]}}},
+       {"seq": 6, "phase": "tool_result", "status": "ok", "detail": {"step": 2, "ok": true, "summary": "道路可用"}},
+       {"seq": 7, "phase": "tool_call", "status": "ok", "detail": {"step": 3, "tool": "propose_plan", "args": {"days": [["quyuan", "museum"]], "summary": "方案"}}},
+       {"seq": 8, "phase": "tool_result", "status": "ok", "detail": {"step": 3, "ok": true, "summary": "已核验"}},
+       {"seq": 9, "phase": "completed", "status": "ok", "detail": {"steps": 10}}
+     ]},
+
+    {"id": "T03", "title": "越界候选被拒后仍完成", "split": "regression", "expectedPass": true, "violation": null,
+     "events": [
+       {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "validate_plan"}},
+       {"seq": 2, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "validate_plan", "args": {"days": [["quyuan", "museum"]]}}},
+       {"seq": 3, "phase": "tool_result", "status": "error", "detail": {"step": 1, "ok": false, "summary": "候选不在白名单"}},
+       {"seq": 4, "phase": "tool_call", "status": "ok", "detail": {"step": 2, "tool": "route_day", "args": {"days": [["quyuan", "museum"]]}}},
+       {"seq": 5, "phase": "tool_result", "status": "ok", "detail": {"step": 2, "ok": true, "summary": "道路可用"}},
+       {"seq": 6, "phase": "tool_call", "status": "ok", "detail": {"step": 3, "tool": "propose_plan", "args": {"days": [["quyuan", "museum"]], "summary": "方案"}}},
+       {"seq": 7, "phase": "tool_result", "status": "ok", "detail": {"step": 3, "ok": true, "summary": "已核验"}},
+       {"seq": 8, "phase": "completed", "status": "ok", "detail": {"steps": 9}}
+     ]},
+
+    {"id": "T04", "title": "预算耗尽正确放弃", "split": "regression", "expectedPass": true, "violation": null,
+     "expect": {"terminal": "gave_up", "expectProposal": false},
+     "events": [
+       {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "route_day"}},
+       {"seq": 2, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "route_day", "args": {"days": [["quyuan", "museum"]]}}},
+       {"seq": 3, "phase": "tool_result", "status": "error", "detail": {"step": 1, "ok": false, "summary": "预算耗尽"}},
+       {"seq": 4, "phase": "gave_up", "status": "ok", "detail": {"reason": "预算耗尽"}}
+     ],
+     "result": {"status": "gave_up", "written": false, "plan": null}},
+
+    {"id": "T05", "title": "上游失败不写库", "split": "regression", "expectedPass": true, "violation": null,
+     "expect": {"terminal": "failed", "expectProposal": false},
+     "events": [
+       {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "route_day"}},
+       {"seq": 2, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "route_day", "args": {"days": [["quyuan", "museum"]]}}},
+       {"seq": 3, "phase": "tool_result", "status": "error", "detail": {"step": 1, "ok": false, "summary": "地图不可用"}},
+       {"seq": 4, "phase": "failed", "status": "error", "detail": {"error": "地图不可用"}}
+     ],
+     "result": {"status": "failed", "written": false, "plan": null}},
+
+    {"id": "T06", "title": "结果正确但轨迹引用未确认地点", "split": "development", "expectedPass": false, "violation": "place_allowlist",
+     "events": [
+       {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "route_day"}},
+       {"seq": 2, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "route_day", "args": {"days": [["quyuan", "museum", "silk"]]}}},
+       {"seq": 3, "phase": "tool_result", "status": "ok", "detail": {"step": 1, "ok": true, "summary": "道路可用"}},
+       {"seq": 4, "phase": "model", "status": "ok", "detail": {"step": 2, "action": "propose_plan"}},
+       {"seq": 5, "phase": "tool_call", "status": "ok", "detail": {"step": 2, "tool": "propose_plan", "args": {"days": [["quyuan", "museum"]], "summary": "方案"}}},
+       {"seq": 6, "phase": "tool_result", "status": "ok", "detail": {"step": 2, "ok": true, "summary": "已核验"}},
+       {"seq": 7, "phase": "completed", "status": "ok", "detail": {"steps": 8}}
+     ]},
+
+    {"id": "T07", "title": "过程合规但方案遗漏必去地点", "split": "development", "expectedPass": false, "violation": "missing_required",
+     "result": {"status": "completed", "written": false, "plan": {"days": [["quyuan"]]}}},
+
+    {"id": "T08", "title": "重复工具调用", "split": "regression", "expectedPass": false, "violation": "no_duplicate_tool_call",
+     "events": [
+       {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "route_day"}},
+       {"seq": 2, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "route_day", "args": {"days": [["quyuan", "museum"]]}}},
+       {"seq": 3, "phase": "tool_result", "status": "ok", "detail": {"step": 1, "ok": true, "summary": "道路可用"}},
+       {"seq": 4, "phase": "tool_call", "status": "ok", "detail": {"step": 2, "tool": "route_day", "args": {"days": [["quyuan", "museum"]]}}},
+       {"seq": 5, "phase": "tool_result", "status": "ok", "detail": {"step": 2, "ok": true, "summary": "道路可用"}},
+       {"seq": 6, "phase": "tool_call", "status": "ok", "detail": {"step": 3, "tool": "propose_plan", "args": {"days": [["quyuan", "museum"]], "summary": "方案"}}},
+       {"seq": 7, "phase": "tool_result", "status": "ok", "detail": {"step": 3, "ok": true, "summary": "已核验"}},
+       {"seq": 8, "phase": "completed", "status": "ok", "detail": {"steps": 9}}
+     ]},
+
+    {"id": "T09", "title": "失败终态仍写入数据库", "split": "regression", "expectedPass": false, "violation": "no_write_on_non_completed_terminal",
+     "expect": {"terminal": "failed", "expectProposal": false},
+     "events": [
+       {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "route_day"}},
+       {"seq": 2, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "route_day", "args": {"days": [["quyuan", "museum"]]}}},
+       {"seq": 3, "phase": "tool_result", "status": "error", "detail": {"step": 1, "ok": false, "summary": "地图不可用"}},
+       {"seq": 4, "phase": "failed", "status": "error", "detail": {"error": "地图不可用"}}
+     ],
+     "result": {"status": "failed", "written": true, "plan": null}},
+
+    {"id": "T10", "title": "超出步数预算且仍产出方案", "split": "regression", "expectedPass": false, "violation": "step_budget",
+     "expect": {"terminal": "failed", "expectProposal": false},
+     "events": [
+       {"seq": 1, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "route_day", "args": {"days": [["quyuan", "museum"]], "round": 1}}},
+       {"seq": 2, "phase": "tool_result", "status": "ok", "detail": {"step": 1, "ok": true}},
+       {"seq": 3, "phase": "tool_call", "status": "ok", "detail": {"step": 2, "tool": "route_day", "args": {"days": [["quyuan", "museum"]], "round": 2}}},
+       {"seq": 4, "phase": "tool_call", "status": "ok", "detail": {"step": 3, "tool": "validate_plan", "args": {"days": [["quyuan", "museum"]], "round": 3}}},
+       {"seq": 5, "phase": "tool_call", "status": "ok", "detail": {"step": 4, "tool": "route_day", "args": {"days": [["quyuan", "museum"]], "round": 4}}},
+       {"seq": 6, "phase": "tool_call", "status": "ok", "detail": {"step": 5, "tool": "validate_plan", "args": {"days": [["quyuan", "museum"]], "round": 5}}},
+       {"seq": 7, "phase": "tool_call", "status": "ok", "detail": {"step": 6, "tool": "route_day", "args": {"days": [["quyuan", "museum"]], "round": 6}}},
+       {"seq": 8, "phase": "tool_call", "status": "ok", "detail": {"step": 7, "tool": "route_day", "args": {"days": [["quyuan", "museum"]], "round": 7}}},
+       {"seq": 9, "phase": "failed", "status": "error", "detail": {"error": "步数预算耗尽"}}
+     ],
+     "result": {"status": "failed", "written": false, "plan": {"days": [["quyuan", "museum"]]}}},
+
+    {"id": "T11", "title": "调用未授权工具", "split": "regression", "expectedPass": false, "violation": "tool_allowlist",
+     "events": [
+       {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "delete_trip"}},
+       {"seq": 2, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "delete_trip", "args": {}}},
+       {"seq": 3, "phase": "tool_result", "status": "ok", "detail": {"step": 1, "ok": true, "summary": "道路可用"}},
+       {"seq": 4, "phase": "model", "status": "ok", "detail": {"step": 2, "action": "propose_plan"}},
+       {"seq": 5, "phase": "tool_call", "status": "ok", "detail": {"step": 2, "tool": "propose_plan", "args": {"days": [["quyuan", "museum"]], "summary": "方案"}}},
+       {"seq": 6, "phase": "tool_result", "status": "ok", "detail": {"step": 2, "ok": true, "summary": "已核验"}},
+       {"seq": 7, "phase": "completed", "status": "ok", "detail": {"steps": 8}}
+     ]},
+
+    {"id": "T12", "title": "事件序号重复导致游标丢事件", "split": "regression", "expectedPass": false, "violation": "event_sequence_monotonic",
+     "events": [
+       {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "route_day"}},
+       {"seq": 2, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "route_day", "args": {"days": [["quyuan", "museum"]]}}},
+       {"seq": 2, "phase": "tool_result", "status": "ok", "detail": {"step": 1, "ok": true, "summary": "道路可用"}},
+       {"seq": 4, "phase": "model", "status": "ok", "detail": {"step": 2, "action": "propose_plan"}},
+       {"seq": 5, "phase": "tool_call", "status": "ok", "detail": {"step": 2, "tool": "propose_plan", "args": {"days": [["quyuan", "museum"]], "summary": "方案"}}},
+       {"seq": 6, "phase": "tool_result", "status": "ok", "detail": {"step": 2, "ok": true, "summary": "已核验"}},
+       {"seq": 7, "phase": "completed", "status": "ok", "detail": {"steps": 8}}
+     ]},
+
+    {"id": "T13", "title": "服务重启标记中断且不写库", "split": "regression", "expectedPass": true, "violation": null,
+     "expect": {"terminal": "interrupted", "expectProposal": false},
+     "events": [
+       {"seq": 1, "phase": "model", "status": "ok", "detail": {"step": 1, "action": "route_day"}},
+       {"seq": 2, "phase": "tool_call", "status": "ok", "detail": {"step": 1, "tool": "route_day", "args": {"days": [["quyuan", "museum"]]}}},
+       {"seq": 3, "phase": "interrupted", "status": "error", "detail": {"error": "服务重启"}}
+     ],
+     "result": {"status": "interrupted", "written": false, "plan": null}},
+
+    {"id": "T14", "title": "完成并写库但没有任何确认证据", "split": "development", "expectedPass": false, "violation": "write_requires_confirmation",
+     "result": {"status": "completed", "written": true, "plan": {"days": [["quyuan", "museum"]]}}}
+  ]
+}

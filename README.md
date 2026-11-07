@@ -7,13 +7,17 @@
 
 当前执行范围、里程碑与验收标准见 [杭州版本执行计划](docs/hangzhou-plan.md)；已完成与未完成能力见 [能力清单](docs/capability-matrix.md)。现阶段已支持候选地点草案、单地点意图加入和局部路线调整；规则需求确认与模型分日排序已接通，多方案可在新建旅行中比较。
 
-## 当前状态（2026-11-05）
+## 当前状态（2026-11-07）
+
+> 线上前端仍是上一版且 owner-private（403）；下面「已验收」指源码与线上 API，不代表 Sites 静态站点已更新。
 
 - 线上前端：https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site/ ，Sites 静态托管，仅所有者可访问。
 - 线上 API：https://tripcanvas-api.onrender.com/api/v1 ，Render Free 单实例；数据库为 Neon Free PostgreSQL。健康检查返回 `plannerMode=model`、`model=true`、`map=amap`、`routing=amap`、`storage=postgresql`。
 - 线上已验收：注册登录、Bearer 会话、行程同步、版本记录、快照分享与撤销、高德地图与路线、地点搜索、停车接驳。
 - 规划模式：线上已启用 Groq Free Tier 的 `openai/gpt-oss-20b`，支持真实模型分日排序与局部修改；规则草案仍可单独选择。
-- 自动化：前端 101 项（含实际 Vue 组件交互）、后端 171 项测试通过，生产构建通过；GitHub Actions 运行测试、构建、离线评测与空库迁移；Postgres 17 兼容性工作流已跑通（迁移 + 完整后端测试）。最新记录见 `docs/verification.md`。
+- 自动化：前端 124 项（含实际 Vue 组件交互）、后端 269 项测试通过（0 xfail），生产构建通过；GitHub Actions 运行测试、构建、离线评测与空库迁移；Postgres 17 兼容性工作流已跑通（迁移 + 完整后端测试）。最新记录见 `docs/verification.md`。
+- 轨迹级评测：固定集 14 条 `agreement=14/14`；线上 observed 已覆盖「澄清反问」与「规划→确认→保存」两个真实样本，均 `both_pass`。`/planner/confirm` 可选 `runId` 会写出权威 `confirmed` 事件（需部署新后端才在线上生效）。详见 `docs/trajectory-evaluation.md`。
+- 运行期护栏：除步数预算（`MAX_STEPS`/`MAX_TOTAL_STEPS`）外，新增**上下文字符预算**（`PLAN_CONTEXT_CHARS_BUDGET`，默认 28000）与**运行期 TTL**（`PLAN_RUN_TTL_SECONDS`，默认 1800）。任一超额即在调用模型前安全终止为 `incomplete` 并标注 `guard=context|ttl|steps`；弃用运行（超过 TTL）在 `/reply` 恢复时被 `restart()` 直接拒绝，返回清晰提示。`backend/limits.py` 为纯配置模块，`backend/tests/test_budget_guard.py` 覆盖上下文/TTL 护栏与过期运行恢复拒绝，步数护栏由 `backend/tests/test_agent.py` 覆盖。
 
 ## 架构
 
@@ -149,11 +153,14 @@ API 仍在 8000 端口，前端使用 `npm run dev`。不要将示例配置直�
 
 ```sh
 npm test
+npm run typecheck
 npm run build
 .venv/bin/python -m pytest backend/tests -q
 ```
 
-当前结果：前端 101 项、后端 171 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过；CI 此外运行 `ruff check`（pyflakes 规则）、30 条离线评测与 Alembic 空库迁移。
+一行跑完全套基线：`bash scripts/verify.sh`（`--quick` 只跑后端与评测）。脚本统一传 `--basetemp` 绕开本机沙箱 `tmp_path` 冲突，并按四类评测分别输出，见 `docs/evaluation.md`。
+
+当前结果：前端 124 项、后端 269 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过；CI 此外运行 `ruff check`（pyflakes 规则）、30 条离线评测与 Alembic 空库迁移。四类评测分别报告，见 `docs/evaluation.md`；脱敏真实任务集另由 `scripts/evaluate_real_tasks.py` 输出覆盖率与版本对比。
 
 浏览器验收（需本地 API + Vite + Chrome 调试端口）：`node scripts/browser-check.mjs`，脚本会跑完“一句需求 → 地点确认 → 草案 → 确认保存”，并拒绝在非本地 API 上创建测试账号。测试覆盖锁定保护、仅修改指定日期、时间冲突与顺延协调、中文输入法 Enter、地点意图、道路结构校验、分享快照、撤销、用户隔离、版本幂等、高德响应与预算。
 
@@ -162,7 +169,7 @@ npm run build
 - `src/App.vue`：页面、助手、草案预览与应用、保存交互。
 - `src/domain.ts`：行程类型、排程、规则建议、约束与差异。
 - `src/routes.ts`：路线请求、响应校验、供应商 / 停车状态缓存。
-- `src/coordination.ts`、`src/retiming.ts`：建议的时间协调与顺延计算。
+- `src/coordination.ts`、`src/domain.ts`（`departureProposal` / `validDepartureProposal`）：建议的时间协调与顺延计算；对应测试 `src/retiming.test.ts`。
 - `src/composerKeyboard.ts`、`src/placeIntent.ts`：输入法按键与地点意图。
 - `src/components/TripBuilder.vue`、`PlacePicker.vue`：新建需求与候选选择。
 - `src/components/MobilitySettings.vue`：停车选择与预留时间。

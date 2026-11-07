@@ -61,6 +61,27 @@ def test_branches_persist_idempotent_open_independently_and_reject_stale_or_tamp
     assert client.delete('/api/v1/branches/'+branch['id']).status_code==404
 
 
+def test_a_verified_source_never_marks_opened_branches_as_verified(client):
+    # Only /planner/confirm stamps a version verified; a scenario branch is a
+    # derived schedule that was re-checked, not an authoritative confirmation.
+    t=source(client)
+    verified=client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':1})
+    assert verified.status_code==200,verified.text
+    t=verified.json()['trip']
+    assert t['validationStatus']=='verified'
+    r=client.post('/api/v1/branches',json={'sourceTripId':t['id'],'sourceRevision':t['revision'],
+        'trip':t,'label':'早出发','requestId':uuid.uuid4().hex})
+    assert r.status_code==200,r.text
+    branch=r.json()['trip']
+    assert branch['validationStatus']=='draft'
+    preview=client.post('/api/v1/branches/'+r.json()['id']+'/preview').json()
+    assert preview['trip']['validationStatus']=='draft'
+    opened=client.post('/api/v1/branches/'+r.json()['id']+'/open')
+    assert opened.status_code==200,opened.text
+    assert opened.json()['trip']['validationStatus']=='draft'
+    assert client.get('/api/v1/trips/'+branch['id']).json()['validationStatus']=='draft'
+
+
 def test_import_grounding_negation_dedup_and_owner_history(client,monkeypatch):
     text='曲院风荷适合散步；浙江省博物馆有空再去；不推荐去雷峰塔。'
     async def model(*args,**kwargs):return {'mentions':[{'name':'曲院风荷','quote':'曲院风荷适合散步','intent':'required'},{'name':'浙江省博物馆','quote':'浙江省博物馆有空再去','intent':'optional'},{'name':'雷峰塔','quote':'不推荐去雷峰塔','intent':'excluded'}]}

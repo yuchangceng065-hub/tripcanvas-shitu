@@ -46,3 +46,18 @@ it('规划拒绝保留结构化问题和选项，供连续修复',async()=>{
  const {api}=await import('./api')
  try{await api('/planner/confirm','POST',{});expect.unreachable()}catch(error){expect(error).toMatchObject({status:422,detail,message:'仍有冲突'})}
 })
+
+it('SSE 流收到 401 时清除令牌，不残留已登录状态',async()=>{
+ const store=new Map<string,string>()
+ vi.stubGlobal('sessionStorage',{
+  getItem:(k:string)=>store.get(k)??null,
+  setItem:(k:string,v:string)=>{store.set(k,v)},
+  removeItem:(k:string)=>{store.delete(k)}
+ })
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response('unauthorized',{status:401})))
+ const {streamRun,setToken}=await import('./api')
+ setToken('stale-token')
+ expect(store.get('tripcanvas.session')).toBe('stale-token')
+ await expect(streamRun('run-1',()=>{})).rejects.toThrow('无法读取运行轨迹')
+ expect(store.has('tripcanvas.session')).toBe(false)
+})

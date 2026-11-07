@@ -33,7 +33,7 @@ watch(candidateIds,ids=>optionalIds.value=optionalIds.value.filter(id=>ids.inclu
 interface RepairOption {action:string;activityId?:string;minutes?:number;day?:number}
 interface DraftIssue {message:string;severity?:'error'|'warning';code?:string;options?:RepairOption[]}
 const remembered=ref<Record<string,unknown>>({})
-const draft=ref<{trip:Trip;source:string;issues:DraftIssue[];warnings:string[];routes?:Record<string,RoadRoute>}|null>(null)
+const draft=ref<{runId?:string;trip:Trip;source:string;issues:DraftIssue[];warnings:string[];routes?:Record<string,RoadRoute>}|null>(null)
 const draftErrors=computed(()=>draft.value?.issues.filter(issue=>issue.severity!=='warning')??[])
 const draftWarnings=computed(()=>draft.value?.issues.filter(issue=>issue.severity==='warning')??[])
 const valid=computed(()=>!!req.value.startDate&&req.value.days>=1&&req.value.days<=3&&req.value.start<req.value.end&&req.value.people>=1&&req.value.people<=10)
@@ -63,7 +63,26 @@ async function loadPreferences(){
 onMounted(loadPreferences)
 watch(()=>props.loggedIn,value=>{if(value)void loadPreferences()})
 function minutes(value:string){const [h,m]=value.split(':').map(Number);return h!*60+m!}
-function updateTime(event:Event,key:'start'|'end'|'returnBy'){const value=(event.target as HTMLInputElement).value;req.value[key]=value?minutes(value):null as never}
+// start/end are required numbers on the backend (422 on null). Only returnBy
+// may be cleared; keep the previous value for the others and show an error.
+function updateTime(event:Event,key:'start'|'end'|'returnBy'){
+ const value=(event.target as HTMLInputElement).value
+ if(!value){
+  if(key==='returnBy')req.value.returnBy=null
+  else error.value='每天出发与结束时间不能为空'
+  return
+ }
+ const parsed=minutes(value)
+ if(!Number.isFinite(parsed)){error.value='时间格式无效';return}
+ error.value=''
+ req.value[key]=parsed
+}
+// Both the draft and the multi-plan request must use the same normalisation:
+// a value below 0.5 km is rejected by Requirements.walkBudgetKm (ge=0.5).
+function normalizedWalkBudget():number|null{
+ const value=req.value.walkBudgetKm
+ return typeof value==='number'&&Number.isFinite(value)&&value>=0.5?value:null
+}
 function resetConversation(){conversationId.value='';conversationOpen.value=false;try{sessionStorage.removeItem(conversationKey)}catch{}}
 function conversationCreated(trip:Trip){resetConversation();emit('created',trip)}
 async function converse(){
@@ -125,7 +144,7 @@ async function generate(){
  if(!props.loggedIn){emit('login');return}
  busy.value=true;error.value='';draft.value=null;comparison.value=null;selectedOption.value=''
  try{
-  const walkBudgetKm=typeof req.value.walkBudgetKm==='number'&&req.value.walkBudgetKm>=0.5?req.value.walkBudgetKm:null
+  const walkBudgetKm=normalizedWalkBudget()
   const data=await api('/planner/draft','POST',{title:title.value,requirements:{...req.value,walkBudgetKm},candidateIds:candidateIds.value,useModel:useModel.value})
   registerPlaces(data.trip.placeSnapshots)
   draft.value=data;reviewRequired.value=false;repairSummary.value='';step.value=2
@@ -138,7 +157,7 @@ async function comparePlans(){
  if(!props.loggedIn){emit('login');return}
  busy.value=true;error.value='';draft.value=null;comparison.value=null;selectedOption.value=''
  try{
-  const result:Comparison=await api('/planner/alternatives','POST',{title:title.value,requirements:{...req.value,walkBudgetKm:req.value.walkBudgetKm||null},candidateIds:candidateIds.value,optionalIds:optionalIds.value,useModel:useModel.value})
+  const result:Comparison=await api('/planner/alternatives','POST',{title:title.value,requirements:{...req.value,walkBudgetKm:normalizedWalkBudget()},candidateIds:candidateIds.value,optionalIds:optionalIds.value,useModel:useModel.value})
   comparison.value=result
   for(const option of result.options)registerPlaces(option.trip.placeSnapshots)
   if(result.options.length)selectOption(result.options[0]!.id,true)
@@ -150,7 +169,7 @@ async function comparePlans(){
 function selectOption(id:string,initial=false){
  if(busy.value&&!initial)return
  const option=comparison.value?.options.find(item=>item.id===id);if(!option)return
- draft.value={...clone(option),source:comparison.value!.source,warnings:comparison.value!.warnings}
+ draft.value={...clone(option),runId:comparison.value!.runId,source:comparison.value!.source,warnings:comparison.value!.warnings}
  selectedOption.value=id;reviewRequired.value=false;repairSummary.value='';error.value=''
 }
 
@@ -191,7 +210,7 @@ async function applyRepair(option:RepairOption){
   for(const day of next.days){const index=day.activities.findIndex(item=>item.id===option.activityId&&item.lock==='none');if(index>=0){day.activities.splice(index,1);break}}
  }
  repairSummary.value=optionLabel(option)+'；正在重算，原旅行尚未保存。'
- draft.value={...draft.value,trip:next,routes:undefined}
+ draft.value={...draft.value,runId:undefined,trip:next,routes:undefined}
  await recheck(next)
  if(!reviewRequired.value)repairSummary.value=optionLabel(option)+'；已重算，请核对逐站时间与剩余问题，再确认保存。'
 }
@@ -199,7 +218,7 @@ async function save(){
  if(!draft.value||draftErrors.value.length||busy.value||reviewRequired.value)return
  busy.value=true;error.value=''
  try{
-  const result=await confirmTrip(draft.value.trip,0)
+  const result=await confirmTrip(draft.value.trip,0,draft.value.runId)
   registerPlaces(result.trip.placeSnapshots)
   emit('created',result.trip)
  }catch(e){

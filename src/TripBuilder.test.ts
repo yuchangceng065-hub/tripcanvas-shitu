@@ -81,7 +81,7 @@ it('多方案切换只更新预览，不写旅行；可选标记随请求提交'
  expect(host.querySelector('.plan-option.chosen')?.textContent).toContain('轻松休闲')
  expect(host.querySelector('.draft-day')?.textContent).toContain('60 分钟');expect(confirmMock).not.toHaveBeenCalled()
  confirmMock.mockResolvedValue({trip:second,revision:1,issues:[],idempotent:false});await click('确认并保存')
- expect(confirmMock).toHaveBeenCalledWith(second,0)
+ expect(confirmMock).toHaveBeenCalledWith(second,0,undefined)
 })
 
 it('搜索没有可核验结果时展示原因，不提供确认保存按钮',async()=>{
@@ -100,4 +100,27 @@ it('自由描述不需要先填日期即可启动，重复打开不创建新任�
  expect(beginConversation).toHaveBeenCalledTimes(1);expect(beginConversation).toHaveBeenCalledWith('想在杭州轻松逛逛，人还没约齐','我的杭州慢游')
  expect(sessionStorage.getItem('tripcanvas.conversation.active.v1')).toContain('conversation-1')
  sessionStorage.removeItem('tripcanvas.conversation.active.v1')
+})
+
+it('清空每天出发时间不会写入 null，且给出字段级错误',async()=>{
+ apiMock.mockResolvedValue(parsed())
+ const text=host.querySelector('textarea')!;text.value='2026-11-14去杭州';text.dispatchEvent(new Event('input'));await nextTick()
+ await click('识别需求')
+ // Time inputs live in step 0, so exercise them BEFORE "确认需求" advances.
+ const labels=[...host.querySelectorAll('label')]
+ const startLabel=labels.find(el=>el.textContent?.includes('每天开始'))!
+ const input=startLabel.querySelector('input')!
+ input.value='';input.dispatchEvent(new Event('change'));await nextTick()
+ expect(host.textContent).toContain('每天出发与结束时间不能为空')
+ host.querySelector<HTMLButtonElement>('.mention-options button')!.click();await nextTick()
+ await click('确认需求')
+ // A subsequent draft request must still carry a numeric start, never null.
+ apiMock.mockImplementation(async(path)=>{
+  if(path==='/planner/draft')return {trip:trip(),source:'heuristic',issues:[],warnings:[],routes:{}}
+  return parsed()
+ })
+ await click('生成草案')
+ const draftCall=apiMock.mock.calls.find(([path])=>path==='/planner/draft')!
+ const body=draftCall[2] as {requirements:{start:unknown}}
+ expect(typeof body.requirements.start).toBe('number')
 })

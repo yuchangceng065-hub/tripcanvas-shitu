@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest'
-import { createTrip,suggest,lockedChanges,clone,validate,schedule } from './domain'
+import { createTrip,suggest,lockedChanges,clone,validate,confirmationIssues,schedule } from './domain'
 describe('规划约束',()=>{
  it('局部调整保留固定午餐和其他日期',()=>{const t=createTrip();const p=suggest(t,0,'轻松一点');expect(p.trip.days[1]).toEqual(t.days[1]);expect(lockedChanges(t,p.trip)).toEqual([]);expect(p.trip.days[0]!.activities.length).toBe(4)})
  it('拒绝删除必须保留的地点',()=>{const t=createTrip();t.days[0]!.activities[0]!.lock='keep';const after=clone(t);after.days[0]!.activities.shift();expect(lockedChanges(t,after).length).toBe(1)})
@@ -22,4 +22,38 @@ it('已保存方案在手工编辑后仍显示必去缺失，不能误报检查�
  t.requirements={city:'杭州',startDate:t.days[0]!.date,days:t.days.length,people:t.people,mode:t.mode,start:570,end:1110,pace:'balanced',interests:[],mustVisitIds:['quyuan']}
  t.days[0]!.activities=t.days[0]!.activities.filter(a=>a.placeId!=='quyuan')
  expect(validate(t).some(issue=>issue.id==='must-quyuan'&&issue.severity==='error')).toBe(true)
+})
+
+describe('确认前严格返程校验（与后端 evaluate 对齐）',()=>{
+ const withReturn=(returnBy:number)=>{
+  const t=createTrip('返程验收','2026-11-14',2)
+  t.requirements={city:'杭州',startDate:t.days[0]!.date,days:2,people:2,mode:'walk',start:570,end:1110,pace:'balanced',interests:[],destinationPlaceId:'station',returnBy}
+  return t
+ }
+ it('返程地点不在末日最后一站时报错',()=>{
+  const t=withReturn(1050);const day=t.days[1]!
+  const i=day.activities.findIndex(a=>a.placeId==='station')
+  const [station]=day.activities.splice(i,1)
+  day.activities.splice(0,0,station!)
+  expect(confirmationIssues(t).some(x=>x.id==='return-not-final')).toBe(true)
+ })
+ it('用实际 start（含 fixedStart）而非 earliest 判断是否超期',()=>{
+  const t=withReturn(1000);const station=t.days[1]!.activities.find(a=>a.placeId==='station')!
+  station.lock='fixed';station.fixedStart=1020
+  // Keep only the destination so earliest == day.start (570) is comfortably
+  // before the deadline, while the actual start is pinned to fixedStart 1020.
+  t.days[1]!.activities=[station]
+  expect(validate(t).some(x=>x.id==='return-constraint')).toBe(false)
+  expect(confirmationIssues(t).some(x=>x.id==='return-deadline')).toBe(true)
+ })
+ it('末日缺少返程地点时给出明确错误',()=>{
+  const t=withReturn(1050)
+  t.days[1]!.activities=t.days[1]!.activities.filter(a=>a.placeId!=='station')
+  expect(confirmationIssues(t).some(x=>x.id==='return-missing')).toBe(true)
+ })
+ it('正常方案不产生额外问题，且严格校验不影响时间协调用的 validate',()=>{
+  const t=withReturn(1050)
+  expect(confirmationIssues(t)).toEqual([])
+  expect(validate(t).filter(x=>x.severity==='error')).toEqual([])
+ })
 })

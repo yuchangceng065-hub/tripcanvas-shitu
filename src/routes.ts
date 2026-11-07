@@ -31,7 +31,7 @@ export function routeKey(trip: Trip, day: number) {
 export function matchesRoute(trip: Trip, day: number, route?: RoadRoute) {
   return !!route && (route.source!=='amap'||parkingKey({parkingByPlace:route.parkingByPlace||{},parkingMinutes:route.parkingMinutes??5})===parkingKey(trip.mobility)) && route.mode === trip.mode && route.placeIds.join(',') === trip.days[day]?.activities.map(a => a.placeId).join(',') && route.legs.length === Math.max(0, route.placeIds.length - 1)
 }
-function coordinate(p: unknown): p is [number, number] {
+export function coordinate(p: unknown): p is [number, number] {
   return Array.isArray(p) && p.length === 2 && p.every(Number.isFinite) && Math.abs(p[0]) <= 180 && Math.abs(p[1]) <= 90
 }
 function measurement(x: unknown): x is number {return typeof x === 'number' && Number.isFinite(x) && x >= 0}

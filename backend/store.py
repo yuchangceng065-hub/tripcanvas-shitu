@@ -1,6 +1,6 @@
 """Persistence helpers, trip diff checks and place catalog writes."""
 from __future__ import annotations
-import json, math, time, uuid
+import hashlib, json, math, time, uuid
 
 from fastapi import HTTPException
 from sqlalchemy import update
@@ -15,6 +15,12 @@ from backend.schemas import Trip
 
 def snapshot(t: Trip):
     return t.model_dump(mode='json', exclude_none=True)
+
+
+def proposal_key(trip: Trip):
+    data = trip.model_dump(mode='json', exclude_none=True,
+                           exclude={'revision', 'validationStatus', 'placeSnapshots'})
+    return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def travel(a, b, mode):
@@ -77,7 +83,7 @@ def owned(s: Session, id, user):
     return t
 
 
-def persist_trip(s: Session, user, trip: Trip):
+def persist_trip(s: Session, user, trip: Trip, *, commit=True):
     """Idempotent write used by both manual sync and the confirm transaction."""
     raw = json.dumps(snapshot(trip), ensure_ascii=False, sort_keys=True)
     row = s.get(TripRow, trip.id)
@@ -97,7 +103,8 @@ def persist_trip(s: Session, user, trip: Trip):
     else:
         s.add(TripRow(id=trip.id, owner=user.id, revision=trip.revision, snapshot=raw))
     s.add(VersionRow(id=str(uuid.uuid4()), trip_id=trip.id, revision=trip.revision, snapshot=raw, created=time.time()))
-    s.commit()
+    if commit:s.commit()
+    else:s.flush()
     return trip.revision
 
 

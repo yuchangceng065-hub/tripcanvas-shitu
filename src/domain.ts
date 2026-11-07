@@ -7,7 +7,7 @@ export interface Activity {id:string;placeId:string;duration:number;lock:Lock;fi
 export interface Day {date:string;start:number;end:number;activities:Activity[]}
 export interface Requirements {city:'杭州';startDate:string;days:number;people:number;mode:'walk'|'drive';start:number;end:number;pace:'relaxed'|'balanced'|'full';interests:string[];originPlaceId?:string|null;destinationPlaceId?:string|null;returnBy?:number|null;walkBudgetKm?:number|null;mustVisitIds?:string[]}
 export interface Mobility {parkingByPlace:Record<string,string>;parkingMinutes:number}
-export interface Trip {id:string;title:string;city:string;people:number;mode:'walk'|'drive';days:Day[];revision:number;requirements?:Requirements|null;placeSnapshots?:Place[];mobility?:Mobility|null}
+export interface Trip {validationStatus?:'draft'|'verified';id:string;title:string;city:string;people:number;mode:'walk'|'drive';days:Day[];revision:number;requirements?:Requirements|null;placeSnapshots?:Place[];mobility?:Mobility|null}
 export interface Entry {activity:Activity;place:Place;start:number;end:number;earliest:number;travel:number;distance:number;conflict:boolean}
 export interface Issue {id:string;message:string;severity:'error'|'info';day?:number}
 export const places:Place[] = reactive(placeData as Place[])
@@ -25,10 +25,29 @@ export function route(a:Place,b:Place,mode:Trip['mode']) {const ac=a.crs==='GCJ0
 export function schedule(trip:Trip,dayIndex:number,roads?:RoadRoute):Entry[]{const day=trip.days[dayIndex];if(!day)return [];let end=day.start;return day.activities.map((a,i)=>{const p=placeById(a.placeId);const travel=i?(matchesRoute(trip,dayIndex,roads)?roads!.legs[i-1]!:route(placeById(day.activities[i-1]!.placeId),p,trip.mode)):{distance:0,minutes:0};const earliest=end+travel.minutes;const fixed=a.lock==='fixed'?a.fixedStart:undefined;const start=Math.max(earliest,fixed??earliest);end=start+a.duration;return {activity:a,place:p,start,end,earliest,travel:travel.minutes,distance:travel.distance,conflict:(fixed!==undefined&&earliest>fixed)||end>day.end}})}
 export const time=(m:number)=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`
 export function validate(trip:Trip,routes:RouteMap={}):Issue[]{const issues:Issue[]=[];trip.days.forEach((day,i)=>{if(day.start>=day.end)issues.push({id:`day-range-${i}`,day:i,message:`第 ${i+1} 天出发时间 ${time(day.start)} 不早于结束上限 ${time(day.end)}，请选择延后结束或缩短顺延时长`,severity:'error'});for(const e of schedule(trip,i,routes[routeKey(trip,i)])){const fixed=e.activity.lock==='fixed'?e.activity.fixedStart:undefined;if(fixed!==undefined&&e.earliest>fixed)issues.push({id:e.activity.id,day:i,message:`第 ${i+1} 天 · ${e.place.name} 最早 ${time(e.earliest)} 到达，比固定时间 ${time(fixed)} 晚 ${e.earliest-fixed} 分钟`,severity:'error'});if(e.end>day.end)issues.push({id:e.activity.id,day:i,message:`第 ${i+1} 天 · ${e.place.name} 将于 ${time(e.end)} 结束，超过当天 ${time(day.end)} 的结束时间 ${e.end-day.end} 分钟`,severity:'error'});if(e.activity.duration<15||e.activity.duration>360)issues.push({id:e.activity.id,day:i,message:'停留时间应在 15—360 分钟之间',severity:'error'})}if(day.activities.length>6)issues.push({id:`day${i}`,day:i,message:`第 ${i+1} 天安排较多，建议留出休息时间`,severity:'info'})});const r=trip.requirements;for(const id of r?.mustVisitIds||[]){if(trip.days.flatMap(d=>d.activities).filter(a=>a.placeId===id).length!==1)issues.push({id:'must-'+id,message:`必去地点 ${placeById(id)?.name??id} 必须保留且仅安排一次`,severity:'error'})}if(r&&r.returnBy!==null&&r.returnBy!==undefined){const di=trip.days.length-1;const list=schedule(trip,di,routes[routeKey(trip,di)]);const index=list.findIndex(e=>e.place.id===r.destinationPlaceId);const arrival=index<0?Infinity:list[index]!.earliest;if(arrival>r.returnBy)issues.push({id:'return-constraint',day:di,message:index<0?'末日返程地点缺失':`第 ${di+1} 天 · ${list[index]!.place.name} 最早 ${time(arrival)} 到达，比返程期限 ${time(r.returnBy)} 晚 ${arrival-r.returnBy} 分钟`,severity:'error'})}return issues}
+// Strict mirror of backend/planning.py::evaluate's return-trip rules. Kept
+// separate from validate() on purpose: the time-coordination engine reuses
+// validate() (by `earliest`) to decide whether a proposal is resolved, so
+// tightening it there would break coordination. This function is only used to
+// gate "apply / confirm", where the backend would otherwise answer 422.
+export function confirmationIssues(trip:Trip,routes:RouteMap={}):Issue[]{
+ const issues:Issue[]=[],r=trip.requirements
+ if(!r||r.returnBy==null)return issues
+ const di=trip.days.length-1,day=trip.days[di]
+ if(!day)return issues
+ const list=schedule(trip,di,routes[routeKey(trip,di)])
+ const matches=list.filter(e=>e.place.id===r.destinationPlaceId)
+ const last=matches.at(-1)
+ if(!last){issues.push({id:'return-missing',day:di,message:'末日返程地点缺失，请加入并核验到达时间',severity:'error'});return issues}
+ if(list.at(-1)!.activity.id!==last.activity.id)issues.push({id:'return-not-final',day:di,message:'返程地点应为末日最后一站，请调整活动顺序',severity:'error'})
+ // The backend uses _activity_start() = max(earliest, fixedStart), not earliest.
+ if(last.start>r.returnBy)issues.push({id:'return-deadline',day:di,message:`第 ${di+1} 天 · ${last.place.name} 最早 ${time(last.start)} 才能到达，晚于要求的 ${time(r.returnBy)}`,severity:'error'})
+ return issues
+}
 export function lockedChanges(before:Trip,after:Trip):string[]{const errors:string[]=[];before.days.forEach((d,di)=>d.activities.forEach(a=>{if(a.lock==='none')return;const next=after.days.flatMap(x=>x.activities).find(x=>x.id===a.id);if(!next||next.placeId!==a.placeId||next.lock!==a.lock)errors.push(`${placeById(a.placeId).name} 已锁定`);if(a.lock==='fixed'&&next&&(after.days[di]?.date!==d.date||!after.days[di]?.activities.some(x=>x.id===a.id)||next.fixedStart!==a.fixedStart||next.duration!==a.duration))errors.push(`${placeById(a.placeId).name} 的固定安排不可修改`)}));return errors}
 export interface DepartureShift {day:number;delay:number;shiftFixed:boolean;extendEnd:boolean}
 export interface Coordination {day:number;basis:Trip;changes:string[];resolved:boolean;earlierStart?:number;warnings:string[]}
-export interface Proposal {id:string;baseRevision:number;trip:Trip;summary:string;changes:string[];source:'demo'|'model'|'schedule';departure?:DepartureShift;coordination?:Coordination;visit?:{day:number;placeId:string;query:string};transport?:{day:number}}
+export interface Proposal {runId?:string;id:string;baseRevision:number;trip:Trip;summary:string;changes:string[];source:'demo'|'model'|'schedule';departure?:DepartureShift;coordination?:Coordination;visit?:{day:number;placeId:string;query:string};transport?:{day:number}}
 // Only these simple departure requests use arithmetic; mixed requests still go to the assistant.
 export function departureDelay(prompt:string):number|null {
  if(!/晚.*出发|出发.*晚|推迟.*出发|出发.*推迟|多睡/.test(prompt)||/不要|不想|别|室内|下雨|减少|删除|去掉|换成|增加|添加/.test(prompt))return null

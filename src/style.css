@@ -86,3 +86,7 @@
 }
 .agent-graph-track li { padding: 4px 8px; border-radius: 6px; background: #e4edd8; }
 .agent-graph-track li:last-child { color: white; background: #315f4d; }
+
+/* Action offered when a slow cloud confirm landed after a local edit. */
+.toast-action { flex-shrink: 0; margin-left: 6px; padding: 5px 10px; border-radius: 6px; background: #eff5e8; color: #214f40; font-size: 11px; font-weight: 600; }
+.toast-action:hover { background: #fff; }

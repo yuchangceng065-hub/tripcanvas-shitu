@@ -34,8 +34,27 @@ it('显示真实逐站时间、锁定、来源和地点取舍，明确确认才�
  expect(host.textContent).toContain('高德');expect(confirmMock).not.toHaveBeenCalled()
  expect(startMock).toHaveBeenCalledWith(expect.objectContaining({title:'测试杭州',optionalIds:['silk']}),expect.any(AbortSignal))
  button('确认并保存 Agent 方案').click();await flush()
- expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({id:'agent-qa',title:'测试杭州'}),0)
+ expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({id:'agent-qa',title:'测试杭州'}),0,'r1')
  expect(created).toBeTruthy()
+})
+it('规划解释采用最终方案确认的需求，不沿用运行开始时的表单',async()=>{
+ const initial:Requirements={...requirements,mustVisitIds:['quyuan'],destinationPlaceId:'station',returnBy:1020}
+ input.requirements=initial
+ const finalTrip=trip()
+ finalTrip.days=[{date:'2026-11-14',start:570,end:1110,activities:[
+  {id:'a',placeId:'quyuan',duration:90,lock:'keep'},
+  {id:'b',placeId:'station',duration:15,lock:'fixed',fixedStart:1020}]}]
+ finalTrip.requirements={...initial,mustVisitIds:['quyuan','museum'],returnBy:1000}
+ const finalPlan={...plan(),trip:finalTrip,includedIds:['quyuan','museum'],omittedIds:['silk'],
+  timeline:[{date:'2026-11-14',start:570,end:1110,activities:[
+   {activityId:'a',placeId:'quyuan',start:570,end:660,travelMinutes:0,waitingMinutes:0,duration:90,lock:'keep',fixedStart:null},
+   {activityId:'b',placeId:'station',start:1005,end:1020,travelMinutes:10,waitingMinutes:15,duration:15,lock:'fixed',fixedStart:null}]}]}
+ watchMock.mockResolvedValueOnce({status:'completed',validation:finalPlan})
+ mount();await flush()
+ const reasons=host.querySelector('[aria-label="规划依据"]')?.textContent??''
+ expect(reasons).toContain('曲院风荷');expect(reasons).toContain('浙江省博物馆')
+ expect(reasons).toContain('提前 10 分钟')
+ expect(reasons).not.toContain('提前 30 分钟')
 })
 it('连接失败后继续查看相同运行，不重新创建或消耗生成次数',async()=>{
  watchMock.mockRejectedValueOnce(new Error('连接中断'))

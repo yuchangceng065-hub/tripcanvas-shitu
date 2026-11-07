@@ -6,7 +6,7 @@
 
 `POST /api/v1/planner/agent` 接收与 alternatives 相同的 title、requirements、candidateIds、optionalIds，立即返回 `{runId,status:"running"}`。请求进入后台前检查地点是否存在、候选是否重复、起终点是否混入游览候选、候选是否足够分日。
 
-`GET /runs/{runId}` 返回实际运行状态、持久化事件、模型用量及完成后的 `validation`。终态包括 completed、needs_input、gave_up、incomplete、failed、interrupted。方案不自动保存，仍需 `/planner/confirm`。
+`GET /runs/{runId}` 返回实际运行状态、持久化事件、模型用量及完成后的 `validation`。终态包括 completed、needs_input、needs_confirmation、gave_up、incomplete、failed、interrupted、cancelled。会话层用 `review` 表示「待确认」，与 run 层的 `needs_confirmation` 是同一阶段在不同对象的命名，不是两个状态。方案不自动保存，仍需 `/planner/confirm`。
 
 ## 服务端边界
 
@@ -33,7 +33,7 @@
 
 ## 验证口径
 
-本轮自动化：前端 101 项、后端 171 项、Ruff、类型检查与构建通过；原固定工程任务 30/30。新增 Agent 回归覆盖候选越界、同日/跨日重复、必去遗漏、可选取舍、标题、同站往返与返程晚到、有效长 JSON/历史损坏、SSE 状态与跨域游标、断线恢复、去重、取消查看、待运行恢复和旧预览失效。
+（历史快照）本轮自动化：前端 101 项、后端 171 项、Ruff、类型检查与构建通过；原固定工程任务 30/30。当前数字见 README「当前状态」段。新增 Agent 回归覆盖候选越界、同日/跨日重复、必去遗漏、可选取舍、标题、同站往返与返程晚到、有效长 JSON/历史损坏、SSE 状态与跨域游标、断线恢复、去重、取消查看、待运行恢复和旧预览失效。
 
 原来的 30 条是工程固定任务，并非 Agent 模型准确率。真实模型与浏览器验收在 verification.md 追加，测试中脚本化模型不冒充真实 AI。
 

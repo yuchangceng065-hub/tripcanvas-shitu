@@ -1,9 +1,11 @@
 import asyncio,json,logging,os,time,uuid
-from fastapi import APIRouter,Depends,HTTPException,Request
+from fastapi import APIRouter,Depends,HTTPException,Query,Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from backend.store import proposal_key
 from backend.agent import validate_agent_request
-from backend.conversation import create_session,load_session,public_session,claim_reply,schedule,recent_sessions
+from backend.conversation import (create_session,load_session,public_session,claim_reply,
+    release_reply,schedule,recent_sessions)
 from backend.preferences import load_preferences, remember_from_requirements
 from backend.alternatives import PlanSearch
 from backend.places import PLACES,POIS
@@ -13,9 +15,40 @@ from backend.app import (amap_enabled,current_user,db,draft_order,locked_violati
     model_api_key,model_json,persist_trip,remember_place,reserve_user_daily,route_body,
     snapshot,throttle,verify_proposal)
 from backend.db import Run,SessionLocal,TripRow,User
-from backend.runlog import RunRecorder,events_for,run_payload,decode_detail
+from backend.runlog import RunRecorder,events_for,run_payload,decode_detail,_run_status
+from backend.agui_events import to_agui_frame
 from backend.schemas import ConfirmBody,DayEdit,ModelResult,RequestBody,SuggestionBody,Trip,TripBody,ConversationStart,ConversationReply
 router=APIRouter()
+
+def _confirmation_recorder(session, data, user):
+    if not data.runId:
+        return None
+    run = session.get(Run, data.runId)
+    if run is None or run.owner != user.id:
+        raise HTTPException(404, '规划运行不存在')
+    result = json.loads(run.result)
+    hashes = result.get('confirmationHashes', [])
+    # Older runs retain the proposal itself rather than a fingerprint.
+    for key in ('validation', 'proposal'):
+        saved = result.get(key)
+        if isinstance(saved, dict) and isinstance(saved.get('trip'), dict):
+            hashes = [*hashes, proposal_key(Trip.model_validate(saved['trip']))]
+    # A run bound to another trip is not evidence for this confirmation, even
+    # if a client somehow replays a matching proposal fingerprint.
+    if run.trip_id and run.trip_id != data.trip.id:
+        raise HTTPException(409, '规划运行与当前行程不一致，请重新打开方案')
+    if (result.get('status') != 'completed' or run.base_revision != data.baseRevision
+            or proposal_key(data.trip) not in hashes):
+        raise HTTPException(409, '方案与原规划结果不一致，请重新预览并核验修改后的草稿')
+    return RunRecorder.restore(run.id)
+
+
+def _record_confirmation(recorder, session, trip_id, revision, idempotent):
+    if recorder is not None and not recorder.confirm(
+            {'tripId': trip_id, 'revision': revision, 'idempotent': bool(idempotent),
+             'source': 'planner/confirm', 'at': time.time()}, session=session):
+        raise HTTPException(409, '规划运行状态已变化，请重新打开方案')
+
 
 @router.post('/api/v1/planner/preview')
 async def preview(data:TripBody,request:Request,user:User=Depends(current_user)):
@@ -33,12 +66,15 @@ async def confirm(data:ConfirmBody,request:Request,user:User=Depends(current_use
     throttle('confirm:'+user.id,10)
     trip=data.trip;target=data.baseRevision+1
     if trip.revision not in (data.baseRevision,target):raise HTTPException(409,'草案版本与确认基准不一致，请重新生成')
-    candidate=trip.model_copy(update={'revision':target})
+    candidate=trip.model_copy(update={'revision':target,'validationStatus':'verified'})
+    recorder=_confirmation_recorder(s,data,user)
     row=s.get(TripRow,trip.id)
     if row:
         if row.owner!=user.id:raise HTTPException(404,'旅行不存在')
         # A retry of the same confirmation returns the stored result instead of 409.
         if row.revision==target and snapshot(Trip.model_validate_json(row.snapshot))==snapshot(candidate):
+            _record_confirmation(recorder,s,trip.id,target,True)
+            s.commit()
             return {'trip':snapshot(candidate),'revision':target,'issues':[],'idempotent':True}
         if row.revision!=data.baseRevision:raise HTTPException(409,'旅行已被其他请求更新，请重新打开后再确认')
         before=Trip.model_validate_json(row.snapshot)
@@ -61,7 +97,9 @@ async def confirm(data:ConfirmBody,request:Request,user:User=Depends(current_use
     hard=[issue for issue in found if issue['severity']=='error']
     source='amap' if amap_enabled() else 'osrm'
     if hard:raise HTTPException(422,detail={'code':'infeasible','issues':found,'routes':routes,'route_source':source})
-    revision=persist_trip(s,user,candidate)
+    revision=persist_trip(s,user,candidate,commit=False)
+    _record_confirmation(recorder,s,candidate.id,revision,False)
+    s.commit()
     try:remember_from_requirements(user.id,candidate.requirements)
     except Exception:logging.getLogger('tripcanvas.preferences').warning('failed to remember soft preferences',exc_info=False)
     return {'trip':snapshot(candidate),'revision':revision,'issues':found,'route_source':source,'idempotent':False}
@@ -85,7 +123,9 @@ async def parse_requirements(data:RequestBody,request:Request,user:User=Depends(
     interests=parsed['requirements'].get('interests') or []
     if interests:
         try:suggestions=[remember_place(place) for place in (await searcher.search(interests[0]))[:4]]
-        except HTTPException:pass
+        except HTTPException as error:
+            logging.getLogger(__name__).warning('interest suggestion search failed: %s',error.detail)
+            parsed['suggestion_error']=str(error.detail)[:160]
     parsed['suggestions']=suggestions
     parsed['search_source']='amap' if amap_enabled() else 'photon'
     return parsed
@@ -115,7 +155,7 @@ async def alternatives(data:AlternativesBody,request:Request,user:User=Depends(c
             result['modelUsage']=request.state.model_metrics
             result['runId']=recorder.id
             recorder.event('validation',detail={'options':len(result.get('options',[])),'unavailable':len(result.get('unavailable',[]))})
-            recorder.complete({'runId':recorder.id,'options':len(result.get('options',[])),'source':result['source']})
+            recorder.complete({'runId':recorder.id,'options':len(result.get('options',[])),'source':result['source'],'modelUsage':result['modelUsage'],'confirmationHashes':[proposal_key(Trip.model_validate(option['trip'])) for option in result.get('options',[])]})
             return result
     except Exception as error:
         recorder.fail(getattr(error,'detail',error));raise
@@ -162,10 +202,21 @@ def list_conversations(user:User=Depends(current_user)):
 async def answer_conversation(id:str,data:ConversationReply,request:Request,user:User=Depends(current_user)):
     throttle('agent-answer:'+user.id,8);require_model()
     # Ownership and idempotence are checked before scheduling another activation.
+    # Keep the pre-claim snapshot so a refused restart can restore the session.
+    previous=load_session(id,user.id)
     row,replay=claim_reply(id,user.id,data)
     if not replay:
-        recorder=RunRecorder.restore(id);recorder.restart()
-        schedule(request.app.state,recorder,row['version'],row['state'])
+        recorder=RunRecorder.restore(id)
+        if not recorder.restart():
+            release_reply(id,user.id,previous,row['version'])
+            raise HTTPException(409,'本次任务已结束或状态已变化，无法继续回复，请新建任务')
+        try:
+            schedule(request.app.state,recorder,row['version'],row['state'])
+        except Exception:
+            # Never leave the session marked running with no worker behind it.
+            recorder.fail('任务启动失败，上下文已保留')
+            release_reply(id,user.id,previous,row['version'])
+            raise
     return {'runId':id,'status':row['status'],'version':row['version'],'idempotent':replay}
 
 
@@ -182,7 +233,7 @@ async def draft(data:DraftBody,request:Request,user:User=Depends(current_user)):
             if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(trip,day))
         issues=evaluate(trip,routes,POIS)
         recorder.event('validation',detail={'errors':sum(1 for i in issues if i['severity']=='error'),'warnings':sum(1 for i in issues if i['severity']!='error')})
-        recorder.complete({'runId':recorder.id,'source':source,'tripId':trip.id})
+        recorder.complete({'runId':recorder.id,'source':source,'tripId':trip.id,'modelUsage':request.state.model_metrics,'confirmationHashes':[proposal_key(trip)]})
         return {'trip':snapshot(trip),'source':source,'issues':issues,'routes':routes,'runId':recorder.id,'modelUsage':request.state.model_metrics,'warnings':['营业时间、票价、停车与进出景区时间待确认。','草案仅使用你确认的候选地点；保存前请核对。']}
     except Exception as error:
         recorder.fail(getattr(error,'detail',error));raise
@@ -211,7 +262,7 @@ async def plan(data:SuggestionBody,request:Request,user:User=Depends(current_use
             result=validate_edit(output)
         except ValueError:raise HTTPException(422,'模型建议未通过结构或锁定检查，原行程未修改')
         id=str(uuid.uuid4());proposal={'id':id,'baseRevision':data.trip.revision,'trip':snapshot(result.trip),'summary':result.summary,'changes':result.changes,'source':'model','runId':recorder.id,'modelUsage':request.state.model_metrics}
-        recorder.complete({'proposal':proposal,'runId':recorder.id})
+        recorder.complete({'proposal':proposal,'runId':recorder.id,'modelUsage':request.state.model_metrics})
         return proposal
     except Exception as error:
         recorder.fail(getattr(error,'detail',error));raise
@@ -228,12 +279,13 @@ def get_run(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
     return payload
 
 @router.get('/api/v1/runs/{id}/events')
-async def run_events(id:str,request:Request,user:User=Depends(current_user),s:Session=Depends(db)):
+async def run_events(id:str,request:Request,user:User=Depends(current_user),s:Session=Depends(db),wire_format:str=Query('sse',alias='format')):
     r=s.get(Run,id)
     if not r or r.owner!=user.id:raise HTTPException(404,'运行不存在')
     try:cursor=int(request.headers.get('last-event-id','0') or 0)
     except ValueError:cursor=0
     s.close()  # Do not hold a pooled DB connection for the whole event stream.
+    agui=wire_format=='ag-ui'
     async def stream():
         last=max(0,cursor);deadline=time.monotonic()+90;heartbeat=time.monotonic()
         while time.monotonic()<deadline:
@@ -241,12 +293,16 @@ async def run_events(id:str,request:Request,user:User=Depends(current_user),s:Se
             events=events_for(id,last)
             for event in events:
                 last=event.seq
-                payload=json.dumps({'status':event.status,'detail':decode_detail(event.detail)},ensure_ascii=False)
-                yield f'id: {event.seq}\nevent: {event.phase}\ndata: {payload}\n\n'
+                detail=decode_detail(event.detail)
+                if agui:
+                    yield to_agui_frame(event.phase,event.status,detail,event.seq,id)
+                else:
+                    payload=json.dumps({'status':event.status,'detail':detail},ensure_ascii=False)
+                    yield f'id: {event.seq}\nevent: {event.phase}\ndata: {payload}\n\n'
             if not events:
                 with SessionLocal() as session:
                     current=session.get(Run,id)
-                    status=json.loads(current.result).get('status') if current else None
+                    status=_run_status(current) if current else None
                 if status not in ('running',None):break
             if time.monotonic()-heartbeat>=10:
                 yield ': keep-alive\n\n';heartbeat=time.monotonic()

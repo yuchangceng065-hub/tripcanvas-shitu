@@ -109,6 +109,10 @@ class Run(Base):
     result: Mapped[str] = mapped_column(Text)
     created: Mapped[float] = mapped_column(Float)
     applied: Mapped[int] = mapped_column(Integer, default=0)
+    # Monotonic activation token. Every resume bumps it; a background task
+    # holding an older token is fenced out of events and result writes.
+    generation: Mapped[int] = mapped_column(Integer, default=0,
+                                           server_default='0', nullable=False)
 
 
 class RunEvent(Base):

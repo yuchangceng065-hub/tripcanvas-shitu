@@ -121,10 +121,20 @@ async def model_json_messages(messages, *, max_tokens=1200, temperature=.15, res
                                                'temperature': temperature, 'max_tokens': max_tokens, 'stream': False, **options})
             response.raise_for_status()
             provider_result = response.json()
+            if not isinstance(provider_result, dict):
+                raise ValueError('供应商返回结构异常，请重新输出一个动作 JSON 对象')
             record_usage(trace, provider_result.get('usage'))
             usage_received = True
-            choice = provider_result['choices'][0]
-            return parse_model_json(choice['message']['content'], choice.get('finish_reason'))
+            try:
+                choice = provider_result['choices'][0]
+                content = choice['message']['content']
+                finish_reason = choice.get('finish_reason')
+            except (KeyError, IndexError, TypeError, AttributeError) as error:
+                # A malformed provider payload is a generation failure, not an
+                # unhandled crash: the old model_json path retries once, and
+                # AgentSteps.decide() feeds ValueError back to the model.
+                raise ValueError('供应商返回结构异常，请重新输出一个动作 JSON 对象') from error
+            return parse_model_json(content, finish_reason)
     except httpx.HTTPStatusError as error:
         status = error.response.status_code
         try:

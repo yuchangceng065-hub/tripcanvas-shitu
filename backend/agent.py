@@ -5,21 +5,24 @@ must pass the same deterministic validation used by /planner/confirm.
 """
 from __future__ import annotations
 import json
+import os
+import time
 from types import SimpleNamespace
 
 from fastapi import HTTPException
 
 from backend.alternatives import PlanSearch, metrics
+from backend.limits import context_budget_chars, context_chars, estimate_tokens, run_ttl_seconds
 from backend.model_gateway import model_json_messages
 from backend.planning import evaluate, make_trip, walking_km
 from backend.places import POIS
 from backend.routing import RouteBody
 from backend.schemas import Trip
-from backend.store import snapshot, remember_place
+from backend.store import snapshot, remember_place, proposal_key
 from backend.runlog import encode_detail
 from backend.agent_schema import ACTIONS,decision_format
 
-MAX_STEPS = int(__import__('os').getenv('PLAN_AGENT_STEPS', '6'))
+MAX_STEPS = int(os.getenv('PLAN_AGENT_STEPS', '6'))
 MAX_TOTAL_STEPS = 12
 
 SYSTEM = '''你是杭州行程规划 Agent。每一步只输出一个 JSON 对象，不要 Markdown，不要解释。
@@ -202,6 +205,11 @@ class AgentSteps:
         )}
         self.step = checkpoint.get('step', 0) if checkpoint else 0
         self.limit = min(self.step + MAX_STEPS, MAX_TOTAL_STEPS)
+        # Independent runtime budgets: a step cap (above) bounds model calls, the
+        # context cap bounds prompt growth, and the TTL bounds wall-clock age. All
+        # three are read from config so behaviour (not just the limit value) is testable.
+        self.context_budget = context_budget_chars()
+        self.ttl_seconds = run_ttl_seconds()
         self.output_format = decision_format(data.candidateIds, sorted(self.toolbox.anchors),
                                              repair=bool(reserve_repair))
 
@@ -325,23 +333,72 @@ class AgentSteps:
             summary['search'] = outcome['summary']['search']
         self.recorder.event('tool_result', detail={'step': self.step, 'ok': True, 'summary': summary})
         self.recorder.complete({'runId': self.recorder.id, 'status': 'completed',
-                                'validation': validation, 'modelSteps': self.step})
+                                'validation': validation, 'confirmationHashes': [proposal_key(trip)], 'modelSteps': self.step})
         return {'runId': self.recorder.id, 'status': 'completed', 'plan': validation, 'steps': self.step}
 
     def incomplete(self):
         message = f'本轮 {MAX_STEPS} 步或累计 {MAX_TOTAL_STEPS} 步预算已用完，仍未给出可行方案'
-        self.recorder.finish('incomplete', {'message': message})
-        return {'runId': self.recorder.id, 'status': 'incomplete', 'message': message}
+        self.recorder.finish('incomplete', {'message': message, 'guard': 'steps', 'steps': self.step})
+        return {'runId': self.recorder.id, 'status': 'incomplete', 'message': message, 'guard': 'steps'}
+
+    # --- Runtime budgets: context window and wall-clock TTL -------------------
+    # These mirror the step budget: a guard violation is checked *before* the
+    # model is invoked, so an over-budget run stops cleanly instead of looping
+    # (decide() returning None re-enters the choose node and would spin forever).
+
+    def context_chars_used(self) -> int:
+        return context_chars(self.messages)
+
+    def estimate_tokens_used(self) -> int:
+        return estimate_tokens(self.messages)
+
+    def over_context_budget(self) -> bool:
+        return self.context_chars_used() > self.context_budget
+
+    def run_expired(self) -> bool:
+        return (time.time() - self.recorder.created) > self.ttl_seconds
+
+    def guard_violation(self) -> str | None:
+        """Return the first violated budget, or None if the run may continue."""
+        if self.run_expired():
+            return 'ttl'
+        if self.over_context_budget():
+            return 'context'
+        return None
+
+    def terminate(self):
+        """Stop a run that breached the TTL or context budget, preserving the plan.
+
+        The run stays `incomplete` (not failed) because the guard fired before
+        any corrupting write; the message tells the user it was a safety stop.
+        """
+        reason = self.guard_violation()
+        if reason == 'ttl':
+            self.recorder.event('run_expired', detail={'ttlSeconds': self.ttl_seconds,
+                                                       'elapsedSeconds': round(time.time() - self.recorder.created, 1)})
+            message = f'本次规划运行已超过 {self.ttl_seconds} 秒上限，已安全停止；可重新开始一次新的规划。'
+        elif reason == 'context':
+            self.recorder.event('context_exhausted', detail={'budgetChars': self.context_budget,
+                                                            'usedChars': self.context_chars_used(),
+                                                            'estimatedTokens': self.estimate_tokens_used()})
+            message = f'本次运行的上下文已接近模型窗口上限（约 {self.context_budget} 字符），已安全停止以保护结果与成本。'
+        else:
+            message = f'本轮 {MAX_STEPS} 步或累计 {MAX_TOTAL_STEPS} 步预算已用完，仍未给出可行方案'
+        self.recorder.finish('incomplete', {'message': message, 'guard': reason, 'contextChars': self.context_chars_used(),
+                                           'steps': self.step})
+        return {'runId': self.recorder.id, 'status': 'incomplete', 'message': message, 'guard': reason}
 
 
 async def run_agent(data, router, recorder, *, checkpoint=None, persist=None, preferences=''):
     """Keep the original entry point for already-created tasks."""
     steps = AgentSteps(data, router, recorder, checkpoint=checkpoint,
                        persist=persist, preferences=preferences)
-    while steps.step < steps.limit:
+    while not steps.guard_violation() and steps.step < steps.limit:
         decision = await steps.decide()
         if decision is not None:
             result = await steps.act(decision)
             if result is not None:
                 return result
+    if steps.guard_violation():
+        return steps.terminate()
     return steps.incomplete()

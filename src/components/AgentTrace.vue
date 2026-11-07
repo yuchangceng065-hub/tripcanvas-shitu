@@ -4,6 +4,7 @@ import {LoaderCircle,Check,AlertTriangle,Sparkles} from '@lucide/vue'
 import {startAgent,watchRun,confirmTrip,answerConversation,type ConversationView,type ConversationAnswer,type AgentEvent} from '../api'
 import {handleComposerKeydown} from '../composerKeyboard'
 import {ApiError} from '../apiError'
+import {planningEvidence,planDecision} from '../agentExplanation'
 import {durationLabel,type PlanMetrics} from '../planningOptions'
 import {placeById,registerPlaces,time,type Requirements,type Trip} from '../domain'
 const props=defineProps<{title:string;requirements:Requirements;candidateIds:string[];optionalIds?:string[];loggedIn:boolean;initialRunId?:string}>()
@@ -27,6 +28,17 @@ const tools:Record<string,string>={search_places:'查找地点',repair_plan:'搜
 const graphLabels:Record<string,string>={understand:'理解需求',search_places:'地点搜索',review_requirements:'需求核对',choose_action:'选择工具',execute_tool:'处理动作'}
 const graphNodes=computed(()=>events.value.filter(event=>event.phase==='graph_node'))
 const visibleEvents=computed(()=>events.value.filter(event=>event.phase!=='graph_node'))
+const evidence=computed(()=>planningEvidence(events.value))
+const decisions=computed(()=>{
+ if(!plan.value)return []
+ // Only the requirements attached to the final confirmed plan are evidence.
+ // props hold the form values at run start; after a multi-turn conversation the
+ // confirmed must-visit places and return deadline can differ, so falling back
+ // to props would state reasons the tools never checked.
+ const requirements=plan.value.trip.requirements??null
+ const requiredIds=requirements?.mustVisitIds?.length?requirements.mustVisitIds:null
+ return planDecision(plan.value,requiredIds,requirements)
+})
 const name=(id:string)=>placeById(id)?.name??id
 function label(event:AgentEvent){
  if(event.phase==='graph_pause')return '检查点已保存，等待你的确认'
@@ -109,7 +121,7 @@ async function start(){
 async function save(){
  if(!plan.value||busy.value||hardErrors.value)return
  busy.value=true;error.value=''
- try{const result=await confirmTrip(plan.value.trip,0);emit('created',result.trip)}
+ try{const result=await confirmTrip(plan.value.trip,0,runId.value);emit('created',result.trip)}
  catch(e){error.value=(e as Error).message}
  finally{busy.value=false}
 }
@@ -126,11 +138,20 @@ onUnmounted(()=>controller?.abort())
  <section class="agent-trace" aria-label="Agent 运行轨迹">
   <header><span class="agent-title"><Sparkles :size="15"/>Agent 运行轨迹</span><small role="status">{{statusLabels[status]??status}}</small></header>
   <p v-if="busy" class="form-hint"><LoaderCircle :size="13" class="spin"/>正在连接本次运行，断线后会继续获取结果…</p>
+  <section v-if="evidence.length||decisions.length" aria-label="规划依据" class="agent-graph-track">
+   <h3>为什么这样安排</h3>
+   <ul><li v-for="line in evidence" :key="line">{{line}}</li></ul>
+   <ul><li v-for="line in decisions" :key="line">{{line}}</li></ul>
+   <p class="form-hint">依据本次道路查询、约束检查与最终地点取舍整理。</p>
+  </section>
+  <details>
+   <summary>查看执行详情 · {{events.length}} 条记录</summary>
   <div v-if="graphNodes.length" class="agent-graph-track" aria-label="LangGraph 节点轨迹">
    <strong>LangGraph · MCP</strong>
    <ol><li v-for="node in graphNodes" :key="node.seq">{{graphLabels[String(node.detail.node)]||node.detail.node}}</li></ol>
   </div>
   <ol class="agent-steps"><li v-for="event in visibleEvents" :key="event.seq" :class="event.status"><span>{{label(event)}}</span><small v-if="summary(event)">{{summary(event)}}</small></li></ol>
+  </details>
   <p v-if="error" class="form-error" role="alert"><AlertTriangle :size="13"/>{{error}}</p>
   <button v-if="status==='disconnected'&&runId" class="button quiet" @click="observe" :disabled="busy">继续查看本次运行</button>
   <section v-if="conversation&&!busy&&['needs_input','needs_confirmation','failed','interrupted'].includes(status)" class="agent-conversation" aria-label="继续原任务">

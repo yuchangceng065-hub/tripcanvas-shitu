@@ -179,6 +179,25 @@ def claim_reply(run_id,owner,body):
     return {'version':new_version,'status':'running','state':state},False
 
 
+def release_reply(run_id,owner,previous,claimed_version):
+    """Undo a claimed reply when the run could not be re-activated.
+
+    `claim_reply` commits the new session version before the caller can ask
+    `RunRecorder.restart()` to open a new activation. If that restart is
+    refused (sealed run or a newer generation won), the reply must not stay
+    consumed: restore the exact pre-claim version/status/state so the user can
+    read the task again and retry. The version predicate prevents clobbering a
+    reply that another request claimed in the meantime.
+    """
+    with SessionLocal.begin() as db:
+        result=db.execute(update(PlanningSession).where(
+            PlanningSession.id==run_id,PlanningSession.owner==owner,
+            PlanningSession.version==claimed_version).values(
+            version=previous['version'],status=previous['status'],
+            state=json.dumps(previous['state'],ensure_ascii=False),updated=time.time()))
+        return result.rowcount==1
+
+
 def compile_review(state):
     facts=state.get('facts') or {};missing=[];questions=[]
     if facts.get('city') not in ('杭州','杭州市'):
@@ -285,7 +304,9 @@ async def refine_places(state, services, recorder, persist, search_places=None):
                 {'role':'user','content':json.dumps({'mentions':summary},ensure_ascii=False)}],
                 max_tokens=600,response_format=refine_format())
             decision=RefineOutput.model_validate(output)
-        except (HTTPException,ValueError,TypeError):
+        except (HTTPException,ValueError,TypeError) as error:
+            recorder.event('search_refine_failed',status='error',
+                           detail={'error':str(getattr(error,'detail',error))[:160]})
             break
         executed=0
         for item in decision.queries:
@@ -303,7 +324,10 @@ async def refine_places(state, services, recorder, persist, search_places=None):
                     found=[remember_place(p) for p in (await searcher.search(item.query))[:3]]
                 else:
                     found=await search_places(item.query)
-            except HTTPException:continue
+            except HTTPException as error:
+                recorder.event('place_search_failed',status='error',
+                               detail={'query':item.query,'error':str(error.detail)[:160]})
+                continue
             known={candidate['id'] for candidate in mention['candidates']}
             for place in found:
                 if place['id'] not in known:
@@ -351,6 +375,10 @@ def review_intake(state, recorder):
     ready=compile_review(state)
     state['turns'].append({'role':'assistant','text':state['question']})
     recorder.event('clarification',detail={'missing':state['missing'],'ready':ready})
+    # Two layers, deliberately two names: the RUN terminal is
+    # `needs_confirmation` (consumed by trajectory_eval's PAUSE_PHASES), while
+    # the SESSION status returned to the UI is `review`. Do not collapse them
+    # without updating both consumers and docs/agent.md.
     recorder.finish('needs_confirmation' if ready else 'needs_input',{'question':state['question']})
     return 'review' if ready else 'needs_input'
 
@@ -393,8 +421,11 @@ def schedule(services,recorder,version,state):
         except HTTPException as error:recorder.fail(error.detail)
         except Exception as error:
             logging.getLogger(__name__).warning(
-                'conversation run %s failed (%s)', recorder.id, type(error).__name__
+                'conversation run %s failed (%s): %s', recorder.id,
+                type(error).__name__, error, exc_info=True
             )
+            recorder.event('run_error', status='error',
+                           detail={'errorType': type(error).__name__, 'error': str(error)[:200]})
             recorder.fail('本次处理未能完成，任务上下文仍保留，可以重试。')
         finally:
             try:

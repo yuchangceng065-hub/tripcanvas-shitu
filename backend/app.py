@@ -31,8 +31,18 @@ async def lifespan(app):
             if attempt==4:raise
             await asyncio.sleep(min(2**attempt,8))
     with SessionLocal.begin() as session:
-        for run in session.scalars(select(Run).where(Run.result.like('%"status": "running"%'))):
-            session.execute(update(Run).where(Run.id==run.id).values(result=json.dumps({'kind':json.loads(run.result).get('kind'),'status':'interrupted','error':'服务重启，运行已中断'})))
+        # Do not match the exact json.dumps spacing: both '{"status": "running"}'
+        # and '{"status":"running"}' are valid, and a LIKE on one form silently
+        # leaves the other running forever after a restart.
+        for run in session.scalars(select(Run).where(Run.result.like('%"status":%running%'))):
+            try:
+                stored=json.loads(run.result)
+            except (ValueError,TypeError):
+                continue
+            if not isinstance(stored,dict) or stored.get('status')!='running':continue
+            session.execute(update(Run).where(Run.id==run.id).values(result=json.dumps(
+                {'kind':stored.get('kind'),'status':'interrupted','error':'服务重启，运行已中断'},
+                ensure_ascii=False)))
     with SessionLocal.begin() as session:
         for row in session.scalars(select(PlanningSession).where(PlanningSession.status=='running')):
             state=json.loads(row.state)

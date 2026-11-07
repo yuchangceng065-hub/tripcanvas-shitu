@@ -66,6 +66,7 @@ class Trip(StrictModel):
     mode: Literal['walk', 'drive'] = 'walk'
     days: list[Day] = Field(min_length=1, max_length=3)
     revision: int = Field(ge=1)
+    validationStatus: Literal['draft', 'verified'] = 'draft'
     requirements: Requirements | None = None
     mobility: Mobility | None = None
     placeSnapshots: list[dict] = Field(default_factory=list, max_length=80)
@@ -94,6 +95,11 @@ class TripBody(StrictModel):
 class ConfirmBody(StrictModel):
     trip: Trip
     baseRevision: int = Field(ge=0)
+    # Optional link to the planning run that produced this draft. The confirm
+    # handler uses it to persist an authoritative `confirmed` event; existing
+    # clients that omit it keep exactly the same behaviour.
+    runId: str | None = Field(default=None, min_length=8, max_length=80,
+                              pattern=r'^[A-Za-z0-9-]+$')
 
 
 class SuggestionBody(StrictModel):

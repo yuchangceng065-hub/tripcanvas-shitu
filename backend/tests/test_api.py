@@ -269,6 +269,28 @@ def test_confirm_rejects_infeasible_draft_with_repair_options(client,monkeypatch
     assert any(issue['options'] for issue in detail['issues'])
     assert client.get('/api/v1/trips/'+t['id']).status_code==404
 
+def test_conflicting_draft_stays_editable_but_only_server_checks_can_verify(client,monkeypatch):
+    register(client)
+    async def slow(body):return {'source':'osrm','legs':[{'minutes':500,'distance':30} for _ in body.placeIds[1:]]}
+    monkeypatch.setattr(app.state.router,'route',slow)
+    t=trip();url='/api/v1/trips/'+t['id']
+    saved=client.put(url,json={'trip':t})
+    assert saved.status_code==200 and saved.json()['validationStatus']=='draft'
+    stored=client.get(url).json()
+    assert stored['validationStatus']=='draft'
+    # A plain PUT never stamps verified, even when the client claims it.
+    claimed=copy.deepcopy(stored);claimed['validationStatus']='verified';claimed['revision']+=1
+    assert client.put(url,json={'trip':claimed}).json()['validationStatus']=='draft'
+    blocked=client.post('/api/v1/planner/confirm',json={'trip':client.get(url).json(),'baseRevision':2})
+    assert blocked.status_code==422 and blocked.json()['detail']['code']=='infeasible'
+    assert client.get(url).json()['validationStatus']=='draft'
+    # Hard conflicts must not freeze the draft: it can still be edited/saved.
+    edited=copy.deepcopy(client.get(url).json());edited['revision']+=1
+    edited['days'][0]['activities'][0]['duration']=45
+    assert client.put(url,json={'trip':edited}).json()['validationStatus']=='draft'
+    assert client.get(url).json()['days'][0]['activities'][0]['duration']==45
+
+
 def test_confirm_refuses_locked_changes_and_keeps_base_version(client,monkeypatch):
     register(client)
     async def roads(body):return fast_roads(body)
@@ -593,6 +615,44 @@ def test_preferences_roundtrip_validation_and_confirm_learning(client,monkeypatc
     assert client.delete('/api/v1/preferences').status_code==200
     assert client.get('/api/v1/preferences').json()=={}
 
+def test_confirm_records_an_authoritative_confirmation_event(client):
+    """The real save endpoint, not the Agent, must produce write evidence."""
+    from sqlalchemy import select
+    from backend.db import User, SessionLocal
+    from backend.runlog import RunRecorder, decode_detail, events_for
+    name='confirm_'+uuid.uuid4().hex[:8]
+    register(client,name)
+    with SessionLocal() as session:
+        owner=session.scalar(select(User).where(User.username==name)).id
+    rec=RunRecorder(owner,'',0,'draft')
+    t=trip()
+    rec.complete({'validation':{'trip':t}})
+    body={'trip':t,'baseRevision':0,'runId':rec.id}
+    first=client.post('/api/v1/planner/confirm',json=body)
+    assert first.status_code==200,first.text
+    assert first.json()['revision']==1
+    events=events_for(rec.id)
+    assert [event.phase for event in events]==['completed','confirmed']
+    detail=decode_detail(events[-1].detail)
+    assert detail['tripId']==t['id'] and detail['revision']==1
+    assert detail['source']=='planner/confirm'
+    # Idempotent retry must not duplicate the marker.
+    replay=client.post('/api/v1/planner/confirm',json=body)
+    assert replay.status_code==200 and replay.json()['idempotent'] is True
+    assert [event.phase for event in events_for(rec.id)].count('confirmed')==1
+    # A foreign runId cannot be used as confirmation evidence.
+    register(client)
+    assert client.post('/api/v1/planner/confirm',
+                       json={'trip':trip(),'baseRevision':0,'runId':rec.id}).status_code==404
+    assert [event.phase for event in events_for(rec.id)].count('confirmed')==1
+
+
+def test_confirm_still_works_without_a_run_id(client):
+    register(client);t=trip()
+    assert client.post('/api/v1/planner/confirm',
+                       json={'trip':t,'baseRevision':0}).status_code==200
+
+
 def test_preferences_fill_only_missing_soft_fields():
     from backend.preferences import apply_preferences
     facts={'pace':None,'interests':[],'walkBudgetKm':None}
@@ -601,3 +661,103 @@ def test_preferences_fill_only_missing_soft_fields():
     explicit=apply_preferences({'pace':'full','interests':['博物馆'],'walkBudgetKm':None},
                                {'pace':'relaxed','interests':['咖啡'],'walkBudgetKm':4})
     assert explicit['pace']=='full' and explicit['interests']==['博物馆'] and explicit['walkBudgetKm']==4
+
+
+def test_confirmation_rejects_a_different_proposal_before_writing(client):
+    from sqlalchemy import select
+    from backend.db import User, SessionLocal, TripRow
+    from backend.runlog import RunRecorder, events_for
+    name='binding_'+uuid.uuid4().hex[:8]
+    register(client,name)
+    with SessionLocal() as session:
+        owner=session.scalar(select(User).where(User.username==name)).id
+    original=trip()
+    rec=RunRecorder(owner,'',0,'agent')
+    rec.complete({'validation':{'trip':original}})
+    changed=copy.deepcopy(original)
+    changed['days'][0]['activities'][0]['duration']=30
+    for candidate in (changed,trip()):
+        response=client.post('/api/v1/planner/confirm',json={'trip':candidate,'baseRevision':0,'runId':rec.id})
+        assert response.status_code==409
+    with SessionLocal() as session:
+        assert session.get(TripRow,original['id']) is None
+    assert [e.phase for e in events_for(rec.id)]==['completed']
+
+
+def test_confirmation_save_and_evidence_rollback_together(client,monkeypatch):
+    from sqlalchemy import select
+    from backend.db import User,SessionLocal
+    from backend.runlog import RunRecorder,events_for
+    name='atomic_'+uuid.uuid4().hex[:8]
+    register(client,name)
+    with SessionLocal() as session:
+        owner=session.scalar(select(User).where(User.username==name)).id
+    t=trip();rec=RunRecorder(owner,'',0,'agent')
+    rec.complete({'validation':{'trip':t}})
+    def fail(*args,**kwargs):raise RuntimeError('confirmation failed')
+    monkeypatch.setattr(RunRecorder,'confirm',fail)
+    with pytest.raises(RuntimeError,match='confirmation failed'):
+        client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0,'runId':rec.id})
+    assert client.get('/api/v1/trips/'+t['id']).status_code==404
+    assert [e.phase for e in events_for(rec.id)]==['completed']
+
+
+def test_confirmation_rejects_stale_base_and_a_run_bound_to_another_trip(client):
+    from sqlalchemy import select
+    from backend.db import Run,User,SessionLocal,TripRow,VersionRow
+    from backend.runlog import RunRecorder,events_for
+    name='bindrev_'+uuid.uuid4().hex[:8]
+    register(client,name)
+    with SessionLocal() as session:
+        owner=session.scalar(select(User).where(User.username==name)).id
+    t=trip();rec=RunRecorder(owner,'',0,'agent')
+    rec.complete({'validation':{'trip':t}})
+    # A stale base revision is refused before anything is written.
+    assert client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':1,'runId':rec.id}).status_code==409
+    # A run that belongs to a different trip cannot serve as evidence, even
+    # when the proposal fingerprint itself matches.
+    with SessionLocal.begin() as session:
+        session.get(Run,rec.id).trip_id='another-trip'
+    assert client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0,'runId':rec.id}).status_code==409
+    with SessionLocal() as session:
+        assert session.get(TripRow,t['id']) is None
+        assert session.scalar(select(VersionRow).where(VersionRow.trip_id==t['id'])) is None
+    assert [e.phase for e in events_for(rec.id)]==['completed']
+
+
+def test_confirmation_marker_refusal_rolls_back_the_trip_write(client,monkeypatch):
+    from sqlalchemy import select
+    from backend.db import User,SessionLocal,VersionRow
+    from backend.runlog import RunRecorder,events_for
+    name='marker_'+uuid.uuid4().hex[:8]
+    register(client,name)
+    with SessionLocal() as session:
+        owner=session.scalar(select(User).where(User.username==name)).id
+    t=trip();rec=RunRecorder(owner,'',0,'agent')
+    rec.complete({'validation':{'trip':t}})
+    # confirm() returning False is a refused marker, not a silent success.
+    monkeypatch.setattr(RunRecorder,'confirm',lambda *a,**k:False)
+    response=client.post('/api/v1/planner/confirm',json={'trip':t,'baseRevision':0,'runId':rec.id})
+    assert response.status_code==409,response.text
+    assert client.get('/api/v1/trips/'+t['id']).status_code==404
+    with SessionLocal() as session:
+        assert session.scalar(select(VersionRow).where(VersionRow.trip_id==t['id'])) is None
+    assert [e.phase for e in events_for(rec.id)]==['completed']
+
+
+def test_manual_edits_invalidate_verification_and_can_be_reconfirmed(client):
+    register(client);t=trip();url='/api/v1/trips/'+t['id']
+    t['validationStatus']='verified'
+    assert client.put(url,json={'trip':t}).json()['validationStatus']=='draft'
+    saved=client.get(url).json()
+    response=client.post('/api/v1/planner/confirm',json={'trip':saved,'baseRevision':saved['revision']})
+    assert response.status_code==200,response.text
+    verified=response.json()['trip']
+    assert verified['validationStatus']=='verified'
+    assert client.put(url,json={'trip':verified}).json()['validationStatus']=='verified'
+    verified['revision']+=1
+    verified['days'][0]['activities'][0]['duration']=30
+    assert client.put(url,json={'trip':verified}).json()['validationStatus']=='draft'
+    draft=client.get(url).json()
+    assert draft['validationStatus']=='draft'
+    assert client.post('/api/v1/planner/confirm',json={'trip':draft,'baseRevision':draft['revision']}).json()['trip']['validationStatus']=='verified'

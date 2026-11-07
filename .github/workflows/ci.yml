@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# A new push to the same ref cancels the previous full run (pytest, evaluation
+# suites and the migration check are expensive and independent of each other).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -22,6 +28,8 @@ jobs:
         run: python -m pytest backend/tests -q
       - name: Offline evaluation (30 fixed tasks)
         run: python scripts/evaluate.py --output-dir /tmp/evaluation
+      - name: Trajectory evaluation (14 fixed Agent traces)
+        run: python scripts/evaluate_trajectory.py --output /tmp/trajectory-report.json
       - name: Migration from empty database
         env:
           DATABASE_URL: sqlite:////tmp/migration.db
@@ -37,4 +45,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npm run typecheck
       - run: npm run build

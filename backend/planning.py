@@ -176,9 +176,14 @@ def walking_km(route,mode):
     if not isinstance(route,dict):return None
     legs=route.get('legs') or []
     if route.get('source')=='amap':
+        # An amap route that carries NO segment data cannot be separated into
+        # walking vs. driving. Returning 0.0 here would falsely claim "known
+        # and within budget" (evaluation.py treats missing segments as
+        # known=False), so report None and let walk_budget_unknown fire.
+        if not any(isinstance(leg.get('segments'),list) for leg in legs):return None
         total=0.0
         for leg in legs:
-            for segment in leg.get('segments',[]) or []:
+            for segment in leg.get('segments') or []:
                 if segment.get('mode')=='walk':total+=float(segment.get('distance') or 0)
         return total
     if mode=='walk':return sum(float(leg.get('distance') or 0) for leg in legs)

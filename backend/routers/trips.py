@@ -3,7 +3,7 @@ from fastapi import APIRouter,Depends,HTTPException,Request,Response
 from sqlalchemy import delete,select
 from sqlalchemy.orm import Session
 from backend.app import amap_enabled,current_user,db,owned,persist_trip,route_body,throttle
-from backend.db import Run,Share,TripRow,VersionRow,User,ScenarioBranch
+from backend.db import Run,RunEvent,PlanningSession,Share,TripRow,VersionRow,User,ScenarioBranch
 from backend.planning import evaluate
 from backend.places import POIS
 from backend.schemas import Trip,TripBody
@@ -20,11 +20,24 @@ def get_trip(id:str,user:User=Depends(current_user),s:Session=Depends(db)):retur
 @router.put('/api/v1/trips/{id}')
 def save_trip(id:str,data:TripBody,user:User=Depends(current_user),s:Session=Depends(db)):
     if id!=data.trip.id:raise HTTPException(422,'旅行 ID 不一致')
-    return {'id':id,'revision':persist_trip(s,user,data.trip)}
+    candidate=data.trip.model_copy(update={'validationStatus':'draft'})
+    existing=s.get(TripRow,id)
+    if existing and existing.owner==user.id:
+        saved=Trip.model_validate_json(existing.snapshot)
+        # Re-syncing identical data preserves a server-verified version.
+        if saved.model_copy(update={'validationStatus':'draft'})==candidate:
+            candidate=saved
+    return {'id':id,'revision':persist_trip(s,user,candidate),'validationStatus':candidate.validationStatus}
 
 @router.delete('/api/v1/trips/{id}')
 def delete_trip(id:str,user:User=Depends(current_user),s:Session=Depends(db)):
     t=owned(s,id,user)
+    # RunEvent and PlanningSession reference a run by id (no FK / cascade), so
+    # they must be removed explicitly or they become unqueryable orphans.
+    run_ids=list(s.scalars(select(Run.id).where(Run.trip_id==id)))
+    if run_ids:
+        s.execute(delete(RunEvent).where(RunEvent.run_id.in_(run_ids)))
+        s.execute(delete(PlanningSession).where(PlanningSession.id.in_(run_ids)))
     for model in (Share,VersionRow,Run):s.execute(delete(model).where(model.trip_id==id))
     s.execute(delete(ScenarioBranch).where(ScenarioBranch.source_trip_id==id,ScenarioBranch.owner==user.id))
     s.delete(t);s.commit();return {'ok':True}

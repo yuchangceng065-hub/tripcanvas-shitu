@@ -53,7 +53,7 @@ export async function api(path:string,method='GET',body?:unknown,signal?:AbortSi
 }
 export async function remoteSuggestion(trip:Trip,day:number,prompt:string):Promise<Proposal>{return api('/planner/suggest','POST',{trip,day,prompt})}
 export interface Confirmed {trip:Trip;revision:number;issues:{code:string;message:string}[];idempotent:boolean}
-export function confirmTrip(trip:Trip,baseRevision:number):Promise<Confirmed>{return api('/planner/confirm','POST',{trip,baseRevision})}
+export function confirmTrip(trip:Trip,baseRevision:number,runId?:string):Promise<Confirmed>{return api('/planner/confirm','POST',{trip,baseRevision,...(runId?{runId}:{})})}
 
 export interface AgentEvent {seq:number;phase:string;status:string;detail:Record<string,unknown>}
 export interface AgentStart {runId:string;status:string}
@@ -79,7 +79,12 @@ export async function streamRun(runId:string,onEvent:(event:AgentEvent)=>void,si
  if(cursor)headers['Last-Event-ID']=String(cursor)
  const timeout=AbortSignal.timeout(100000)
  const response=await fetch(base+'/runs/'+encodeURIComponent(runId)+'/events',{headers,credentials:'include',signal:signal?AbortSignal.any([signal,timeout]):timeout})
- if(!response.ok||!response.body)throw new ApiError(response.status,'无法读取运行轨迹')
+ if(!response.ok||!response.body){
+  // This stream uses raw fetch, so it must clear the stale token itself —
+  // otherwise the UI keeps showing "logged in" after a 401.
+  if(response.status===401)setToken('')
+  throw new ApiError(response.status,'无法读取运行轨迹')
+ }
  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer=''
  try{
   while(true){
