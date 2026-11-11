@@ -4,6 +4,8 @@ import hashlib, json, math, time, uuid
 
 from fastapi import HTTPException
 from sqlalchemy import update
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from backend.amap import restricted_parking
@@ -83,29 +85,46 @@ def owned(s: Session, id, user):
     return t
 
 
-def persist_trip(s: Session, user, trip: Trip, *, commit=True):
+def persist_trip(s: Session, user, trip: Trip, *, commit=True, base_revision=None):
     """Idempotent write used by both manual sync and the confirm transaction."""
-    raw = json.dumps(snapshot(trip), ensure_ascii=False, sort_keys=True)
-    row = s.get(TripRow, trip.id)
+    data = snapshot(trip)
+    raw = json.dumps(data, ensure_ascii=False, sort_keys=True)
+    row = s.get(TripRow, trip.id, populate_existing=True)
+    if row is None:
+        if base_revision not in (None, 0):
+            raise HTTPException(409, '草案基准版本已失效，请重新生成')
+        insert = postgres_insert if s.get_bind().dialect.name == 'postgresql' else sqlite_insert
+        created = s.execute(
+            insert(TripRow).values(id=trip.id, owner=user.id, revision=trip.revision, snapshot=raw)
+            .on_conflict_do_nothing(index_elements=[TripRow.id]).returning(TripRow.id)
+        ).scalar_one_or_none()
+        if created is None:
+            row = s.get(TripRow, trip.id, populate_existing=True)
+            if row is None:
+                raise HTTPException(409, '旅行已被其他请求修改，请重新打开')
     if row:
         if row.owner != user.id:
             raise HTTPException(404, '旅行不存在')
         if row.revision > trip.revision:
             raise HTTPException(409, '云端存在更新版本，请重新打开旅行')
         if row.revision == trip.revision:
-            if snapshot(Trip.model_validate_json(row.snapshot)) != json.loads(raw):
+            if snapshot(Trip.model_validate_json(row.snapshot)) != data:
                 raise HTTPException(409, '同一版本不能覆盖，请更新版本号')
-            return trip.revision
+            return trip.revision, False
+        if base_revision is not None and row.revision != base_revision:
+            raise HTTPException(409, '旅行已被其他请求更新，请重新打开后再确认')
         result = s.execute(update(TripRow).where(TripRow.id == trip.id, TripRow.revision == row.revision)
                            .values(revision=trip.revision, snapshot=raw))
         if result.rowcount != 1:
+            latest = s.get(TripRow, trip.id, populate_existing=True)
+            if (latest and latest.owner == user.id and latest.revision == trip.revision
+                    and snapshot(Trip.model_validate_json(latest.snapshot)) == data):
+                return trip.revision, False
             raise HTTPException(409, '旅行已被其他请求更新')
-    else:
-        s.add(TripRow(id=trip.id, owner=user.id, revision=trip.revision, snapshot=raw))
     s.add(VersionRow(id=str(uuid.uuid4()), trip_id=trip.id, revision=trip.revision, snapshot=raw, created=time.time()))
     if commit:s.commit()
     else:s.flush()
-    return trip.revision
+    return trip.revision, True
 
 
 def locked_violations(before, after):

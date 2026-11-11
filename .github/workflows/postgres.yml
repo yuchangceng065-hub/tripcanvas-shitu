@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      benchmark:
+        description: Run the isolated PostgreSQL contention benchmark
+        type: boolean
+        default: false
 
 jobs:
   postgres:
@@ -37,3 +42,15 @@ jobs:
         run: python -m alembic upgrade head
       - name: Full backend suite against Postgres
         run: python -m pytest backend/tests -q
+      - name: Measure confirmation and event-write contention
+        if: inputs.benchmark
+        env:
+          TRIPCANVAS_BENCHMARK_DATABASE_URL: postgresql+psycopg://postgres:test@localhost:5432/tripcanvas
+        run: python scripts/benchmark_postgres.py --output /tmp/postgres-contention.json
+      - name: Upload benchmark report
+        if: always() && inputs.benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-contention
+          path: /tmp/postgres-contention.json
+          if-no-files-found: error

@@ -40,7 +40,7 @@ def _confirmation_recorder(session, data, user):
     if (result.get('status') != 'completed' or run.base_revision != data.baseRevision
             or proposal_key(data.trip) not in hashes):
         raise HTTPException(409, '方案与原规划结果不一致，请重新预览并核验修改后的草稿')
-    return RunRecorder.restore(run.id)
+    return RunRecorder.restore(run.id, session=session)
 
 
 def _record_confirmation(recorder, session, trip_id, revision, idempotent):
@@ -97,9 +97,11 @@ async def confirm(data:ConfirmBody,request:Request,user:User=Depends(current_use
     hard=[issue for issue in found if issue['severity']=='error']
     source='amap' if amap_enabled() else 'osrm'
     if hard:raise HTTPException(422,detail={'code':'infeasible','issues':found,'routes':routes,'route_source':source})
-    revision=persist_trip(s,user,candidate,commit=False)
-    _record_confirmation(recorder,s,candidate.id,revision,False)
+    revision, written = persist_trip(s, user, candidate, commit=False, base_revision=data.baseRevision)
+    _record_confirmation(recorder, s, candidate.id, revision, not written)
     s.commit()
+    if not written:
+        return {'trip':snapshot(candidate),'revision':revision,'issues':[],'idempotent':True}
     try:remember_from_requirements(user.id,candidate.requirements)
     except Exception:logging.getLogger('tripcanvas.preferences').warning('failed to remember soft preferences',exc_info=False)
     return {'trip':snapshot(candidate),'revision':revision,'issues':found,'route_source':source,'idempotent':False}

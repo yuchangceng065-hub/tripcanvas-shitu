@@ -27,7 +27,8 @@ def save_trip(id:str,data:TripBody,user:User=Depends(current_user),s:Session=Dep
         # Re-syncing identical data preserves a server-verified version.
         if saved.model_copy(update={'validationStatus':'draft'})==candidate:
             candidate=saved
-    return {'id':id,'revision':persist_trip(s,user,candidate),'validationStatus':candidate.validationStatus}
+    revision, _ = persist_trip(s, user, candidate)
+    return {'id':id,'revision':revision,'validationStatus':candidate.validationStatus}
 
 @router.delete('/api/v1/trips/{id}')
 def delete_trip(id:str,user:User=Depends(current_user),s:Session=Depends(db)):

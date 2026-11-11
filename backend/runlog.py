@@ -117,9 +117,9 @@ class RunRecorder:
                             created=self.created, generation=self.generation))
 
     @classmethod
-    def restore(cls, run_id):
+    def restore(cls, run_id, *, session=None):
         recorder = cls.__new__(cls)
-        with SessionLocal() as session:
+        with (SessionLocal() if session is None else nullcontext(session)) as session:
             run = session.get(Run, run_id)
             if run is None:raise ValueError('运行不存在')
             recorder.id = run_id
