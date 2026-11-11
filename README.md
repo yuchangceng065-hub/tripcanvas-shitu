@@ -25,6 +25,8 @@
 
 ## 架构
 
+[一页面试版架构与技术追问](docs/interview-one-page.md)
+
 ```mermaid
 flowchart LR
   B[Browser · Vue 3 + TypeScript] -->|HTTPS /api/v1| A[FastAPI 单实例]
@@ -200,6 +202,11 @@ npm run build
 
 ## 部署
 
-采用 Render Free + Neon Free，配置在 `render.yaml`，步骤见 `docs/render-neon-deployment.md`；公开部署信息（不含凭据）见 `docs/deployment.json`。前端为 Sites 静态托管，发布需按 Sites 工作流同步源码并构建，不能仅凭 GitHub push 认为前端已更新。云端要求 PostgreSQL，不允许临时 SQLite。前端已加入有限时长的唤醒等待、状态提示和手动重连；失败的写请求不会自动重发。
+公开前端由 GitHub Pages 托管，Render 运行 FastAPI，Neon 提供 PostgreSQL。构建脚本从 Git 提交和锁文件生成 Pages 静态产物及 `release.json`。线上验收核对资源哈希、后端提交和跨域预检。
 
-此前 Railway 部署被新账号试用限制阻止，不再作为首选。
+```sh
+python3 scripts/release_pages.py build --commit HEAD --output ../tripcanvas-pages
+python3 scripts/release_pages.py verify --commit HEAD
+```
+
+发布步骤、环境变量和回滚方法见 [部署手册](docs/render-neon-deployment.md)。公开环境信息见 [部署清单](docs/deployment.json)。

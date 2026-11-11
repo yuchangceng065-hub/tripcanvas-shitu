@@ -1,49 +1,69 @@
-# Render Free + Neon Free 部署
+# 拾途杭州发布手册
 
-目标：保留 Vue + FastAPI + PostgreSQL。Render 运行单实例 Python API，Neon 持久保存账号、会话、行程、版本和分享。实际服务已经创建，公开部署信息见 deployment.json。后端健康检查：https://tripcanvas-api.onrender.com/api/v1/health。真实 HTTPS 集成验证已通过。
+公开前端由 GitHub Pages 的产物仓库 `main` 根目录发布。Render 从源码仓库 `main` 部署 FastAPI，Neon 提供 PostgreSQL。[公开页](https://yuchangceng065-hub.github.io/tripcanvas-demo/) · [源码仓库](https://github.com/yuchangceng065-hub/tripcanvas-shitu) · [产物仓库](https://github.com/yuchangceng065-hub/tripcanvas-demo) · [公开配置](deployment.json)
 
-## 免费资源
+## 1. 选定提交并验证
 
-- Render Blueprint 使用 `plan: free`，没有声明付费磁盘或 Render 数据库。
-- Neon 选择 Free，建立一个 TripCanvas 项目；优先选择与 Render Oregon 接近的可用区域。
-- Neon 数据库 URL 使用 SSL，推荐 pooled connection string；只通过 Render 服务端环境变量传递。
-- Render 空闲 15 分钟可能休眠，前端连接时最多等待约 100 秒，显示唤醒提示，失败后允许手动重连。只按访问需求唤醒，不使用定时保活。
+在源码仓库选择已提交的版本，从该提交的干净检出目录运行 `bash scripts/verify.sh`。确认该版本的 GitHub CI 与 PostgreSQL CI 通过。涉及数据库变更时，在隔离 PostgreSQL 先验证空库迁移和旧库升级。
 
-## 创建顺序
-
-1. 登录 GitHub，将本项目源码发布到私有仓库。排除 `.env*`、本地数据库、虚拟环境、构建输出、平台凭据；保留 `.env.example`。
-2. 登录 Neon，确认 Free 套餐后创建项目与数据库，获得带 `sslmode=require` 的 PostgreSQL 连接字符串。不要贴进聊天或提交到 Git。
-3. 登录 Render，授权读取该仓库，通过 `render.yaml` 创建 `tripcanvas-api`，明确选择 Free。
-4. 填入 `DATABASE_URL`；`FRONTEND_ORIGINS` 已限定现有 Sites 域名，`COOKIE_SECURE=1`。
-5. Docker 自动读取 Render `PORT`，运行一个 Uvicorn worker。云端未配置 PostgreSQL 时拒绝启动，防止临时 SQLite 数据丢失。
-6. 检查 `/api/v1/health` 返回 `status=ok`、`storage=postgresql`；验证注册、Bearer 登录、行程同步、版本保护、分享与撤销、路线计算。
-7. 前端构建时设置 `VITE_API_BASE=https://实际服务名.onrender.com/api/v1`，通过 Sites 工作流重新发布。模型密钥仅配置到 Render，不使用 VITE_ 前缀。
-8. 验证冷启动和刷新后的登录状态。发生写入超时时不自动重发注册或分享操作，先连接后检查服务端结果。
-
-## 数据库与运维边界
-
-数据库启动连接有有限次数重试；连接池为 2 个常驻连接、最多额外 2 个连接，并启用失效检测。当前初始表由 SQLAlchemy 创建，后续结构变更应增加迁移。公共路线服务在单进程内限速与缓存；扩容前需要集中限流或替换路线提供方。
-
-免费资源有用量限制；不得自动升级套餐或增加付费资源。模型现接 Groq Free Tier 的 openai/gpt-oss-20b，使用专用 GROQ_API_KEY；不自动升级付费档或切换付费模型。
-
-## 参考
-
-- https://render.com/docs/free
-- https://render.com/docs/blueprint-spec
-- https://neon.com/pricing
-
-## 兼容版本的发布验收
-
-Render Docker 实例在开始接收请求前执行 Alembic。对于旧版由 ORM 创建、且列结构与已知旧版一致的数据库，启动时登记原有版本，再补齐 `runs.generation`。遇到无法识别的结构时启动会报错，便于核对数据库。已有数据应通过 Neon 的备份或分支保留。应用回滚到旧版时可以保留新增列。
-
-发布后读取 `/api/v1/health` 核对后端提交。Blueprint 的 `FRONTEND_ORIGINS` 包含 GitHub Pages 和 Sites 来源。先前手动创建的 Render 服务使用 `RENDER_EXTERNAL_HOSTNAME` 补齐 GitHub Pages 来源，限定为 `tripcanvas-api.onrender.com`。
-
-用独立 QA 账号运行以下采集，`<commit>` 填后端发布的完整提交。它验证重复确认只生成一个版本和一条对应的确认事件。采集会留下 QA 运行记录与一条测试行程。
-
-```bash
-.venv/bin/python scripts/capture_live_run.py \
-  --mode full --allowed-place-ids quyuan,museum \
-  --release-commit <commit> --output /tmp/tripcanvas-release-capture.json
+```sh
+release_commit=$(git rev-parse HEAD)
+bash scripts/verify.sh
+python3 scripts/release_pages.py build --commit "$release_commit" --output ../tripcanvas-pages-dist
 ```
 
-本地用 `backend/tests/test_agent_graph.py` 验证持久检查点、SSE 游标续读、冲突修复、地图故障和重复确认。地图故障用受控夹具模拟，避免在生产环境人为停用地图。真实供应商采集和本地故障模拟各自记录环境与结果。
+构建使用 Python 3.12+ 和 Node.js 22.12+。如需逐字节复现，使用线上 [`release.json`](https://yuchangceng065-hub.github.io/tripcanvas-demo/release.json) 记录的 Node/npm 版本。构建脚本从 Git 读取提交里的前端文件及共享地点目录 `backend/places.json`，在临时目录运行 `npm ci` 与 Vite 构建。CI 也运行这条独立构建路径。产物带 `.nojekyll` 和 `release.json`，记录源码完整 SHA、API 地址、锁文件哈希与每个公开资源的 SHA-256。输出目录应是新目录。
+
+## 2. 部署 Render API
+
+把选定提交合入源码仓库 `main`，等待 Render 自动部署。已有服务采用原生 Python。重建服务时，从仓库根目录用 `pip install -r backend/requirements.txt` 构建，用 `python -m backend.start` 启动，健康检查路径为 `/api/v1/health`。也可用仓库的 [Docker Blueprint](../render.yaml) 新建同类服务。两种入口都读取平台端口并运行单 worker。[Render 部署文档](https://render.com/docs/deploys)
+
+Render 启动时先运行 Alembic。已知的旧版 ORM 建表结构会在校验后登记对应版本，再补齐字段。遇到未知结构时，启动会报错。生产用 PostgreSQL，LangGraph 检查点另由其库初始化。[数据库检查点与保留期](checkpoints.md)
+
+### 环境变量
+
+| 变量 | 配置位置 | 用途 |
+| --- | --- | --- |
+| `VITE_API_BASE` | Pages 构建时 | API 的公开 HTTPS 地址，包含 `/api/v1`。脚本默认使用现有 Render API |
+| `DATABASE_URL` | Render，密钥 | Neon PostgreSQL 连接串，含 `sslmode=require` |
+| `FRONTEND_ORIGINS` | Render | 逗号分隔的来源。公开版为 `https://yuchangceng065-hub.github.io`，Sites 预览保留已有来源 |
+| `COOKIE_SECURE` | Render | HTTPS 部署设为 `1` |
+| `PLANNER_MODE` | Render | `auto` 启用已配置的模型，`rules` 只启用规则 |
+| `MODEL_BASE_URL`、`MODEL_NAME` | Render | 当前 Groq 接口 `https://api.groq.com/openai/v1`，模型 `openai/gpt-oss-20b` |
+| `GROQ_API_KEY` 或 `MODEL_API_KEY` | Render，密钥 | Groq 读取专用变量，其他兼容供应商读取通用变量 |
+| `AMAP_WEB_KEY`、`AMAP_JS_KEY`、`AMAP_JS_SECURITY_CODE` | Render | 高德路线和地图配置。JS Key 使用平台域名限制；Web 服务 Key 和安全密钥留在服务器 |
+| `ROUTING_PROVIDER`、`PUBLIC_API_ORIGIN` | Render | 路线供应商选择和高德 JS 安全代理的 API 根地址 |
+
+限流与供应商预算见 [配置示例](../.env.example)。Render 自动提供 `PORT`、`RENDER_GIT_COMMIT`、`RENDER_EXTERNAL_HOSTNAME`。现有 API 在指定 Render 主机上也会补齐 Pages 来源。只把表里的公开 API 地址交给 Vite。[Render 环境变量说明](https://render.com/docs/environment-variables)
+
+## 3. 发布 Pages 产物
+
+先访问 API 的 `/api/v1/health`，确认 `commit` 匹配选定版本，`status=ok` 且 `storage=postgresql`。然后将构建目录同步到独立的 Pages 产物仓库。
+
+```sh
+git clone https://github.com/yuchangceng065-hub/tripcanvas-demo.git ../tripcanvas-demo-release
+rsync -a --delete --exclude=.git ../tripcanvas-pages-dist/ ../tripcanvas-demo-release/
+git -C ../tripcanvas-demo-release status --short
+git -C ../tripcanvas-demo-release add -A
+git -C ../tripcanvas-demo-release diff --cached --stat
+git -C ../tripcanvas-demo-release commit -m "Publish TripCanvas $release_commit"
+git -C ../tripcanvas-demo-release push origin main
+```
+
+上面的同步目标是专用静态产物仓库。Pages 发布源为 `main` / `/(root)`，使用现有 GitHub 发布权限。[GitHub Pages 发布源说明](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
+
+## 4. 验证与回滚
+
+```sh
+python3 scripts/release_pages.py verify --commit "$release_commit"
+```
+
+脚本通过公开 URL 下载资源，校验首页和静态文件哈希、后端提交、PostgreSQL 健康状态以及 Pages 跨域预检。CDN 更新后，用独立浏览器会话再跑注册、规划、确认保存和刷新后的行程列表。用测试账号验证完整 Agent 保存链路时，运行以下命令。
+
+```sh
+.venv/bin/python scripts/capture_live_run.py --mode full \
+  --allowed-place-ids quyuan,museum --release-commit "$release_commit" \
+  --output /tmp/tripcanvas-release-capture.json
+```
+
+遇到前后端不匹配时，先从 `release.json` 和 `/health` 找到当前提交。回退时，在 Render 选择已验证的旧部署，同时在产物仓库创建回退提交，恢复同一版本的静态文件与 manifest。复测跨域与确认接口。数据库迁移涉及破坏性改动时，先按迁移记录核对兼容性和备份。
