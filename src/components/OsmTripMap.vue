@@ -10,6 +10,7 @@ const props = defineProps<{
   selected: string;
   state: RouteState;
   mode: "walk" | "drive";
+  amapUnavailable?: boolean;
 }>();
 const emit = defineEmits<{ select: [id: string]; retry: [] }>();
 const container = ref<HTMLDivElement>(),
@@ -202,6 +203,9 @@ onUnmounted(() => {
         ><LoaderCircle :size="14" class="spin" /><span
           >正在规划{{ mode === "walk" ? "步行" : "驾车" }}道路路线…</span
         ></template
+      >
+      <template v-else-if="state.status === 'ready' && state.route?.source === 'amap' && amapUnavailable"
+        >高德底图暂不可用 · 转场数据仍可在时间轴查看</template
       >
       <template v-else-if="state.status === 'ready'"
         ><span class="road-swatch" /><span

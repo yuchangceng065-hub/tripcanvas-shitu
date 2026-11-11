@@ -11,7 +11,7 @@ const props = defineProps<{
   state: RouteState;
   mode: "walk" | "drive";
 }>();
-const emit = defineEmits<{ select: [id: string]; retry: [] }>();
+const emit = defineEmits<{ select: [id: string]; retry: []; unavailable: [] }>();
 const container = ref<HTMLDivElement>(),
   mapError = ref(""),
   loading = ref(true);
@@ -138,7 +138,10 @@ async function init() {
     });
     observer.observe(container.value);
   } catch (e) {
-    mapError.value = (e as Error).message;
+    if (!disposed) {
+      mapError.value = (e as Error).message;
+      emit("unavailable");
+    }
   } finally {
     loading.value = false;
   }
