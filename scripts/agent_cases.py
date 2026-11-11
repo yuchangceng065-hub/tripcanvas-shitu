@@ -129,7 +129,16 @@ def run_case(case_id):
             review = reply(client, paused, text='两个人，步行。', choices=choices)
             if review['status'] != 'needs_confirmation':
                 raise AssertionError('Agent should pause for the confirmed requirements')
+            path = '/api/v1/runs/' + run_id + '/events'
+            with client.stream('GET', path) as stream:
+                stream.raise_for_status()
+                cursor = next(int(line[4:]) for line in stream.iter_lines() if line.startswith('id: '))
             run = reply(client, review, confirm=True)
+            stream = client.get(path, headers={'Last-Event-ID': str(cursor)})
+            stream.raise_for_status()
+            replayed = [int(line[4:]) for line in stream.text.splitlines() if line.startswith('id: ')]
+            if replayed != [event['seq'] for event in run['events'] if event['seq'] > cursor]:
+                errors.append('sse_resume_cursor')
             if run['status'] != case['terminal']:
                 errors.append('terminal_status')
             if run.get('engine') != 'langgraph':
@@ -161,9 +170,15 @@ def run_case(case_id):
                     for event in mcp_events
                 ):
                     errors.append('repair_not_executed')
-                body = {'trip': trip, 'baseRevision': 0}
-                for _ in range(2):
-                    response_json(client.post('/api/v1/planner/confirm', json=body))
+                body = {'trip': trip, 'baseRevision': 0, 'runId': run_id}
+                for expected_replay in (False, True):
+                    confirmation = response_json(client.post('/api/v1/planner/confirm', json=body))
+                    if confirmation.get('idempotent') is not expected_replay:
+                        errors.append('confirmation_replay')
+                recorded = response_json(client.get('/api/v1/runs/' + run_id))
+                confirmed = [event for event in recorded['events'] if event['phase'] == 'confirmed']
+                if len(confirmed) != 1 or confirmed[0]['detail'].get('tripId') != trip['id']:
+                    errors.append('confirmation_trace')
                 versions = response_json(client.get('/api/v1/trips/' + trip['id'] + '/versions'))
                 if len(versions) != 1:
                     errors.append('duplicate_versions')

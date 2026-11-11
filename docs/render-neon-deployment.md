@@ -31,3 +31,19 @@
 - https://render.com/docs/free
 - https://render.com/docs/blueprint-spec
 - https://neon.com/pricing
+
+## 兼容版本的发布验收
+
+Render Docker 实例在开始接收请求前执行 Alembic。对于旧版由 ORM 创建、且列结构与已知旧版一致的数据库，启动时登记原有版本，再补齐 `runs.generation`。遇到无法识别的结构时启动会报错，便于核对数据库。已有数据应通过 Neon 的备份或分支保留。应用回滚到旧版时可以保留新增列。
+
+发布后读取 `/api/v1/health` 核对后端提交。公开演示使用 `https://yuchangceng065-hub.github.io` 作为浏览器来源，Render 实际运行环境的 `FRONTEND_ORIGINS` 要包含该来源和现有 Sites 来源。
+
+用独立 QA 账号运行以下采集，`<commit>` 填后端发布的完整提交。它验证重复确认只生成一个版本和一条对应的确认事件。采集会留下 QA 运行记录与一条测试行程。
+
+```bash
+.venv/bin/python scripts/capture_live_run.py \
+  --mode full --allowed-place-ids quyuan,museum \
+  --release-commit <commit> --output /tmp/tripcanvas-release-capture.json
+```
+
+本地用 `backend/tests/test_agent_graph.py` 验证持久检查点、SSE 游标续读、冲突修复、地图故障和重复确认。地图故障用受控夹具模拟，避免在生产环境人为停用地图。真实供应商采集和本地故障模拟各自记录环境与结果。

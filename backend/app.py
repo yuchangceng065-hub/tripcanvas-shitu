@@ -25,7 +25,12 @@ async def lifespan(app):
     app.state.agent_tasks={}
     for attempt in range(5):
         try:
-            Base.metadata.create_all(engine)
+            if os.getenv("RENDER"):
+                from backend.migrate import upgrade_database
+
+                upgrade_database(engine)
+            else:
+                Base.metadata.create_all(engine)
             break
         except OperationalError:
             if attempt==4:raise

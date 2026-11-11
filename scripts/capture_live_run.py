@@ -127,11 +127,14 @@ def main():
     parser.add_argument('--max-replies', type=int, default=3)
     parser.add_argument('--confirmation-evidence', type=Path,
                         help='explicit JSON object used as confirmation evidence')
+    parser.add_argument('--release-commit', help='require this live backend revision and validate confirmation events')
     parser.add_argument('--timeout', type=float, default=240)
     args = parser.parse_args()
 
     from backend.places import POIS
     full = args.mode == 'full'
+    if args.release_commit and not full:
+        parser.error('--release-commit requires --mode full')
     candidate_ids = _ids(args.candidate_ids)
     required_ids = _ids(args.required_place_ids) if full else []
     allowed_places = (_ids(args.allowed_place_ids) if full
@@ -166,6 +169,11 @@ def main():
     password = os.environ.get('CAPTURE_PASSWORD') or secrets.token_urlsafe(24)
 
     with httpx.Client(proxy=proxy, trust_env=True, timeout=90) as client:
+        health = client.get(args.api + '/health')
+        health.raise_for_status()
+        deployed_commit = health.json().get('commit') or ''
+        if args.release_commit and (not deployed_commit or not args.release_commit.startswith(deployed_commit)):
+            raise RuntimeError(f'Expected release {args.release_commit}; API reports {deployed_commit or "unknown"}')
         auth = client.post(args.api + '/auth/register',
                            json={'username': username, 'password': password})
         auth.raise_for_status()
@@ -204,11 +212,28 @@ def main():
         if full and payload.get('status') == 'completed' and trip_id:
             trip = validation['trip']
             base_revision = max(0, int(trip.get('revision', 0)) - 1)
-            confirmed = client.post(args.api + '/planner/confirm', headers=headers,
-                                    json={'trip': trip, 'baseRevision': base_revision})
+            confirm_body = {'trip': trip, 'baseRevision': base_revision}
+            if args.release_commit:
+                confirm_body['runId'] = run_id
+            confirmed = client.post(args.api + '/planner/confirm', headers=headers, json=confirm_body)
             confirm_response = {'httpStatus': confirmed.status_code,
                                 'body': confirmed.json() if confirmed.headers.get(
                                     'content-type', '').startswith('application/json') else None}
+            if args.release_commit:
+                confirmed.raise_for_status()
+                replay = client.post(args.api + '/planner/confirm', headers=headers, json=confirm_body)
+                replay.raise_for_status()
+                if confirmed.json().get('idempotent') or replay.json().get('idempotent') is not True:
+                    raise RuntimeError('Expected initial save followed by an idempotent replay')
+                payload = _poll(client, args.api, run_id, headers, deadline)
+                events = [event for event in payload['events'] if event['phase'] == 'confirmed']
+                if len(events) != 1 or events[0]['detail'].get('tripId') != trip_id:
+                    raise RuntimeError('Expected exactly one confirmed event for the saved trip')
+                versions = client.get(args.api + '/trips/' + trip_id + '/versions', headers=headers)
+                versions.raise_for_status()
+                if len(versions.json()) != 1:
+                    raise RuntimeError('Confirmation retry created a duplicate version')
+                confirmation = {**events[0]['detail'], 'source': 'confirmed run event', 'httpStatus': confirmed.status_code}
             if confirmed.status_code == 200 and confirmation is None:
                 confirmation = {
                     'source': 'POST /api/v1/planner/confirm (live API response)',
@@ -294,7 +319,7 @@ def main():
         'clarificationReplies': replies,
         'health': capture['healthAtCapture'],
     }, ensure_ascii=False, indent=2))
-    return 0
+    return int(bool(args.release_commit) and (run['observedStatus'] != 'completed' or not written))
 
 
 if __name__ == '__main__':

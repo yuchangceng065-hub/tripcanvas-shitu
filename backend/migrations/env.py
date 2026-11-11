@@ -24,6 +24,13 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     from sqlalchemy import create_engine
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     with engine.connect() as connection:

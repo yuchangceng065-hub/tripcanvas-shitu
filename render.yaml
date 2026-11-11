@@ -12,7 +12,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: FRONTEND_ORIGINS
-        value: https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site
+        value: https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site,https://yuchangceng065-hub.github.io
       - key: COOKIE_SECURE
         value: "1"
       - key: PYTHONUNBUFFERED
