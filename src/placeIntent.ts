@@ -13,6 +13,15 @@ import {
 export function normalizePlaceQuery(query: string) {
   return query.trim().replace(/^浙工大/, "浙江工业大学");
 }
+
+export function rankVisitPlaces(query: string, matches: Place[]) {
+  if (query !== "浙江工业大学") return matches;
+  const campus = /^浙江工业大学(?:[（(][^（）()]+校区[）)]|[^（）()]+校区)$/;
+  return [
+    ...matches.filter((place) => campus.test(place.name)),
+    ...matches.filter((place) => !campus.test(place.name)),
+  ];
+}
 const mealWords = /餐厅|饭店|餐馆|酒楼|晚餐|晚饭|吃饭|吃什么|美食/;
 export const dinnerStart = 17 * 60 + 30;
 
@@ -63,7 +72,7 @@ export function extractVisitQuery(text: string): string | null {
   const match = text
     .trim()
     .match(
-      /^(?:我(?:们)?(?:想|要|打算|计划)?(?:去|到|参观|游览|逛|添加|加入|加上)|想(?:去|到|参观|游览|逛)|请(?:帮我)?(?:安排|加入|添加|新增)|(?:帮我|带我)(?:去|参观|添加|加入|加上)|(?:加入|添加|新增)(?:一站)?|去|参观|游览)\s*(.+)$/,
+      /^(?:我(?:们)?(?:想|要|打算|计划)?(?:去|到|参观|游览|逛|添加|加入|加上|加)|想(?:去|到|参观|游览|逛|添加|加入|加上|加)|请(?:帮我)?(?:安排|加入|添加|新增)|(?:帮我|带我)(?:去|参观|添加|加入|加上|加)|(?:加入|添加|新增)(?:一站)?|去|参观|游览)\s*(.+)$/,
     );
   const bare = text.trim();
   if (

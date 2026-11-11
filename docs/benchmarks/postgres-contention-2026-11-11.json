@@ -1,0 +1,650 @@
+{
+  "environment": {
+    "postgres": 170011,
+    "platform": "Linux-7.0.0-1019-azure-x86_64-with-glibc2.43",
+    "logicalCpus": 4,
+    "python": "3.12.16",
+    "gitCommit": "cc0c19de39a42996679d8ec4da9de0228276faee",
+    "dbPoolSize": 2,
+    "dbPoolOverflow": 2,
+    "transport": "in-process ASGI; external providers disabled; confirm throttle bypassed"
+  },
+  "results": [
+    {
+      "workers": 1,
+      "operations": 72,
+      "throughputPerSecond": 89.0,
+      "latency": {
+        "p50Ms": 10.724,
+        "p95Ms": 12.342,
+        "maxMs": 35.456
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 75,
+        "withWaiters": 0,
+        "maxWaiters": 0
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 1,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 1,
+      "operations": 72,
+      "throughputPerSecond": 315.9,
+      "latency": {
+        "p50Ms": 3.106,
+        "p95Ms": 3.467,
+        "maxMs": 3.671
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 22,
+        "withWaiters": 0,
+        "maxWaiters": 0
+      },
+      "workload": "append_events_same_run",
+      "repeat": 1,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 1,
+      "operations": 72,
+      "throughputPerSecond": 90.3,
+      "latency": {
+        "p50Ms": 10.952,
+        "p95Ms": 11.909,
+        "maxMs": 16.029
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 74,
+        "withWaiters": 0,
+        "maxWaiters": 0
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 2,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 1,
+      "operations": 72,
+      "throughputPerSecond": 312.2,
+      "latency": {
+        "p50Ms": 3.15,
+        "p95Ms": 3.396,
+        "maxMs": 4.103
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 22,
+        "withWaiters": 0,
+        "maxWaiters": 0
+      },
+      "workload": "append_events_same_run",
+      "repeat": 2,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 1,
+      "operations": 72,
+      "throughputPerSecond": 81.7,
+      "latency": {
+        "p50Ms": 10.825,
+        "p95Ms": 12.266,
+        "maxMs": 98.186
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 74,
+        "withWaiters": 0,
+        "maxWaiters": 0
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 3,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 1,
+      "operations": 72,
+      "throughputPerSecond": 285.4,
+      "latency": {
+        "p50Ms": 3.347,
+        "p95Ms": 4.102,
+        "maxMs": 6.281
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 24,
+        "withWaiters": 0,
+        "maxWaiters": 0
+      },
+      "workload": "append_events_same_run",
+      "repeat": 3,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 4,
+      "operations": 72,
+      "throughputPerSecond": 80.9,
+      "latency": {
+        "p50Ms": 47.458,
+        "p95Ms": 66.451,
+        "maxMs": 76.565
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 68,
+        "withWaiters": 3,
+        "maxWaiters": 1
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 1,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 4,
+      "operations": 72,
+      "throughputPerSecond": 323.8,
+      "latency": {
+        "p50Ms": 10.236,
+        "p95Ms": 20.347,
+        "maxMs": 30.879
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 21,
+        "withWaiters": 18,
+        "maxWaiters": 3
+      },
+      "workload": "append_events_same_run",
+      "repeat": 1,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 4,
+      "operations": 72,
+      "throughputPerSecond": 86.0,
+      "latency": {
+        "p50Ms": 44.334,
+        "p95Ms": 63.123,
+        "maxMs": 68.849
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 65,
+        "withWaiters": 11,
+        "maxWaiters": 1
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 2,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 4,
+      "operations": 72,
+      "throughputPerSecond": 323.8,
+      "latency": {
+        "p50Ms": 8.426,
+        "p95Ms": 23.175,
+        "maxMs": 31.601
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 21,
+        "withWaiters": 18,
+        "maxWaiters": 3
+      },
+      "workload": "append_events_same_run",
+      "repeat": 2,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 4,
+      "operations": 72,
+      "throughputPerSecond": 87.4,
+      "latency": {
+        "p50Ms": 44.683,
+        "p95Ms": 58.625,
+        "maxMs": 64.384
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 64,
+        "withWaiters": 2,
+        "maxWaiters": 1
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 3,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 4,
+      "operations": 72,
+      "throughputPerSecond": 313.0,
+      "latency": {
+        "p50Ms": 10.784,
+        "p95Ms": 22.278,
+        "maxMs": 33.26
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 22,
+        "withWaiters": 18,
+        "maxWaiters": 3
+      },
+      "workload": "append_events_same_run",
+      "repeat": 3,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 12,
+      "operations": 72,
+      "throughputPerSecond": 80.4,
+      "latency": {
+        "p50Ms": 135.553,
+        "p95Ms": 214.204,
+        "maxMs": 287.746
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 58,
+        "withWaiters": 25,
+        "maxWaiters": 2
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 1,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 12,
+      "operations": 72,
+      "throughputPerSecond": 319.1,
+      "latency": {
+        "p50Ms": 8.602,
+        "p95Ms": 109.638,
+        "maxMs": 163.335
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 22,
+        "withWaiters": 17,
+        "maxWaiters": 3
+      },
+      "workload": "append_events_same_run",
+      "repeat": 1,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 12,
+      "operations": 72,
+      "throughputPerSecond": 87.3,
+      "latency": {
+        "p50Ms": 133.741,
+        "p95Ms": 189.188,
+        "maxMs": 197.176
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 57,
+        "withWaiters": 31,
+        "maxWaiters": 2
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 2,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 12,
+      "operations": 72,
+      "throughputPerSecond": 319.5,
+      "latency": {
+        "p50Ms": 8.76,
+        "p95Ms": 138.792,
+        "maxMs": 165.803
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 22,
+        "withWaiters": 18,
+        "maxWaiters": 3
+      },
+      "workload": "append_events_same_run",
+      "repeat": 2,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 12,
+      "operations": 72,
+      "throughputPerSecond": 85.6,
+      "latency": {
+        "p50Ms": 137.618,
+        "p95Ms": 198.803,
+        "maxMs": 226.796
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 60,
+        "withWaiters": 19,
+        "maxWaiters": 2
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 3,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 12,
+      "operations": 72,
+      "throughputPerSecond": 314.1,
+      "latency": {
+        "p50Ms": 10.94,
+        "p95Ms": 129.741,
+        "maxMs": 186.162
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 22,
+        "withWaiters": 17,
+        "maxWaiters": 3
+      },
+      "workload": "append_events_same_run",
+      "repeat": 3,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 24,
+      "operations": 72,
+      "throughputPerSecond": 79.4,
+      "latency": {
+        "p50Ms": 269.952,
+        "p95Ms": 423.18,
+        "maxMs": 446.647
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 55,
+        "withWaiters": 21,
+        "maxWaiters": 2
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 1,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 24,
+      "operations": 72,
+      "throughputPerSecond": 309.1,
+      "latency": {
+        "p50Ms": 11.257,
+        "p95Ms": 168.332,
+        "maxMs": 191.592
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 23,
+        "withWaiters": 17,
+        "maxWaiters": 3
+      },
+      "workload": "append_events_same_run",
+      "repeat": 1,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 24,
+      "operations": 72,
+      "throughputPerSecond": 85.9,
+      "latency": {
+        "p50Ms": 257.182,
+        "p95Ms": 412.626,
+        "maxMs": 540.533
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 54,
+        "withWaiters": 26,
+        "maxWaiters": 2
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 2,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 24,
+      "operations": 72,
+      "throughputPerSecond": 292.9,
+      "latency": {
+        "p50Ms": 11.656,
+        "p95Ms": 179.074,
+        "maxMs": 207.727
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 24,
+        "withWaiters": 17,
+        "maxWaiters": 3
+      },
+      "workload": "append_events_same_run",
+      "repeat": 2,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 24,
+      "operations": 72,
+      "throughputPerSecond": 74.7,
+      "latency": {
+        "p50Ms": 278.422,
+        "p95Ms": 479.381,
+        "maxMs": 584.412
+      },
+      "statuses": {
+        "200_replay": 71,
+        "200_saved": 1
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 58,
+        "withWaiters": 18,
+        "maxWaiters": 2
+      },
+      "workload": "confirm_same_new_trip",
+      "repeat": 3,
+      "versions": 1,
+      "confirmedEvents": 1,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    },
+    {
+      "workers": 24,
+      "operations": 72,
+      "throughputPerSecond": 298.3,
+      "latency": {
+        "p50Ms": 11.477,
+        "p95Ms": 173.515,
+        "maxMs": 198.057
+      },
+      "statuses": {
+        "written": 72
+      },
+      "lockSamples": {
+        "intervalMs": 10,
+        "total": 25,
+        "withWaiters": 18,
+        "maxWaiters": 3
+      },
+      "workload": "append_events_same_run",
+      "repeat": 3,
+      "eventCount": 72,
+      "uniqueSequences": 72,
+      "integrityPassed": true,
+      "passed": true,
+      "errorRate": 0.0
+    }
+  ]
+}

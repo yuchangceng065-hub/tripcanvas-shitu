@@ -172,11 +172,13 @@ export function confirmTrip(
   trip: Trip,
   baseRevision: number,
   runId?: string,
+  shiftFixedDay?: number,
 ): Promise<Confirmed> {
   return api("/planner/confirm", "POST", {
     trip,
     baseRevision,
     ...(runId ? { runId } : {}),
+    ...(shiftFixedDay === undefined ? {} : { shiftFixedDay }),
   });
 }
 

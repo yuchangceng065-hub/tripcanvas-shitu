@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   extractVisitQuery,
   normalizePlaceQuery,
+  rankVisitPlaces,
   visitProposal,
 } from "./placeIntent";
 import {
@@ -63,6 +64,8 @@ describe("想去的地点接入真实路线", () => {
   it("识别自然输入和校区简称，保留具体校区", () => {
     expect(extractVisitQuery("我想参观浙工大")).toBe("浙江工业大学");
     expect(extractVisitQuery("想去浙工大看看")).toBe("浙江工业大学");
+    expect(extractVisitQuery("想加浙工大")).toBe("浙江工业大学");
+    expect(extractVisitQuery("想加上浙工大屏峰校区")).toBe("浙江工业大学屏峰校区");
     expect(extractVisitQuery("我想去看看浙工大")).toBe("浙江工业大学");
     expect(extractVisitQuery("浙工大")).toBe("浙江工业大学");
     expect(extractVisitQuery("我想去浙工大屏峰校区")).toBe(
@@ -71,6 +74,11 @@ describe("想去的地点接入真实路线", () => {
     expect(normalizePlaceQuery(" 浙工大朝晖校区 ")).toBe(
       "浙江工业大学朝晖校区",
     );
+  });
+  it("大学简称优先显示整个校区，保留具体机构供用户核对", () => {
+    const department = { ...campus, name: "浙江工业大学朝晖校区就业指导中心" };
+    expect(rankVisitPlaces("浙江工业大学", [department, campus])).toEqual([campus, department]);
+    expect(rankVisitPlaces("浙江工业大学就业指导中心", [department, campus])).toEqual([department, campus]);
   });
   it("室内、轻松和晚出发继续使用对应调整逻辑", () => {
     for (const text of [

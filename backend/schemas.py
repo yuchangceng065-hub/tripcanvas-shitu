@@ -100,6 +100,7 @@ class ConfirmBody(StrictModel):
     # clients that omit it keep exactly the same behaviour.
     runId: str | None = Field(default=None, min_length=8, max_length=80,
                               pattern=r'^[A-Za-z0-9-]+$')
+    shiftFixedDay: int | None = Field(default=None, ge=0, le=2)
 
 
 class SuggestionBody(StrictModel):

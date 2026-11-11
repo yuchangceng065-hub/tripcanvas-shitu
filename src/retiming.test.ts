@@ -11,6 +11,7 @@ import {
   lockedChanges,
 } from "./domain";
 import { routeKey, type RoadRoute } from "./routes";
+import { coordinateProposal } from "./coordination";
 function roads(
   t: ReturnType<typeof createTrip>,
   day = 0,
@@ -129,6 +130,25 @@ describe("整日顺延", () => {
     expect(
       proposalErrors(t, p.trip, r).some((i) => i.id === "return-constraint"),
     ).toBe(true);
+  });
+  it("顺延一小时赶不上返程时，给出更短的可行顺延", async () => {
+    const trip = createTrip();
+    const day = trip.days[1]!;
+    day.start = 900;
+    day.activities = [
+      { ...day.activities[0]!, duration: 60, lock: "keep" },
+      day.activities.at(-1)!,
+    ];
+    const routes = roads(trip, 1, [10]);
+    const load = async () => { throw new Error("当前路线已核验"); };
+    const requested = await coordinateProposal(
+      trip, departureProposal(trip, 1, 60, routes), 1, routes, load,
+    );
+    expect(requested.coordination).toMatchObject({ resolved: false, earlierStart: 950 });
+    const fallback = departureProposal(trip, 1, 50, routes);
+    expect(proposalErrors(trip, fallback.trip, routes)).toEqual([]);
+    expect(fallback.trip.days[1]!.activities.at(-1)!.fixedStart).toBe(1020);
+    expect(fallback.trip.days[0]).toEqual(trip.days[0]);
   });
   it("其他日期的旧冲突不会阻止当前日期的有效调整", () => {
     const t = createTrip(),

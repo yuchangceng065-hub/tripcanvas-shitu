@@ -19,6 +19,7 @@
 - 线上已验收：注册登录、Bearer 会话、行程同步、版本记录、快照分享与撤销、高德地图与路线、地点搜索、停车接驳。
 - 规划模式：线上已启用 Groq Free Tier 的 `openai/gpt-oss-20b`，支持真实模型分日排序与局部修改；规则草案仍可单独选择。
 - 自动化覆盖前端组件、后端、生产构建、离线评测和空库迁移。PostgreSQL 17 工作流对真库运行完整后端测试。
+- PostgreSQL 并发实测覆盖同一行程重复确认和同一运行事件写入，报告包含吞吐、P95、错误率和锁等待采样。[并发报告](docs/postgres-contention.md)
 - Agent 任务覆盖 5/5，四条为线上执行，一条为隔离环境的地图故障注入。四条过程和结果均达标；不可行任务安全地保留了数据状态，但终止方式和工具失败轨迹与预设不同。固定合成轨迹的评测器标签一致性为 14/14。[评测口径](docs/evaluation.md)
 - 运行期护栏：除步数预算（`MAX_STEPS`/`MAX_TOTAL_STEPS`）外，新增**上下文字符预算**（`PLAN_CONTEXT_CHARS_BUDGET`，默认 28000）与**运行期 TTL**（`PLAN_RUN_TTL_SECONDS`，默认 1800）。任一超额即在调用模型前安全终止为 `incomplete` 并标注 `guard=context|ttl|steps`；弃用运行（超过 TTL）在 `/reply` 恢复时被 `restart()` 直接拒绝，返回清晰提示。`backend/limits.py` 为纯配置模块，`backend/tests/test_budget_guard.py` 覆盖上下文/TTL 护栏与过期运行恢复拒绝，步数护栏由 `backend/tests/test_agent.py` 覆盖。
 

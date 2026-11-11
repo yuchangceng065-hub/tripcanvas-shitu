@@ -66,6 +66,8 @@ async def confirm(data:ConfirmBody,request:Request,user:User=Depends(current_use
     throttle('confirm:'+user.id,10)
     trip=data.trip;target=data.baseRevision+1
     if trip.revision not in (data.baseRevision,target):raise HTTPException(409,'草案版本与确认基准不一致，请重新生成')
+    if data.shiftFixedDay is not None and data.runId is not None:
+        raise HTTPException(422, '固定安排顺延仅用于手动确认')
     candidate=trip.model_copy(update={'revision':target,'validationStatus':'verified'})
     recorder=_confirmation_recorder(s,data,user)
     row=s.get(TripRow,trip.id)
@@ -78,18 +80,29 @@ async def confirm(data:ConfirmBody,request:Request,user:User=Depends(current_use
             return {'trip':snapshot(candidate),'revision':target,'issues':[],'idempotent':True}
         if row.revision!=data.baseRevision:raise HTTPException(409,'旅行已被其他请求更新，请重新打开后再确认')
         before=Trip.model_validate_json(row.snapshot)
+        day = data.shiftFixedDay
+        if day is not None and (
+            len(before.days) != len(trip.days) or day >= len(trip.days)
+            or before.days[day].date != trip.days[day].date
+            or before.days[day].start >= trip.days[day].start
+            or any(old != new for index, (old, new) in enumerate(zip(before.days, trip.days)) if index != day)
+            or before.requirements != trip.requirements or before.mobility != trip.mobility
+        ):
+            raise HTTPException(422, '固定安排只能随当前日期的出发时间顺延')
         if before.requirements and before.requirements.mustVisitIds and (not trip.requirements or set(before.requirements.mustVisitIds)!=set(trip.requirements.mustVisitIds)):
             raise HTTPException(422,detail={'code':'must_visit_changed','issues':[{'code':'must_visit_changed','severity':'error','message':'普通调整不能解除必去地点保护，请先在需求中明确修改','options':[]}]})
         if before.requirements and before.requirements.returnBy is not None and (
             not trip.requirements or trip.requirements.returnBy!=before.requirements.returnBy or
             trip.requirements.destinationPlaceId!=before.requirements.destinationPlaceId or trip.days[-1].date!=before.days[-1].date):
             raise HTTPException(422,detail={'code':'return_constraint_changed','issues':[{'code':'return_constraint_changed','severity':'error','message':'普通方案不能修改返程地点、日期或期限，请在行程设置中明确调整','options':[]}]})
-        problems=locked_violations(before,trip)
+        problems=locked_violations(before,trip,shift_fixed_day=day)
         if problems:
             raise HTTPException(422,detail={'code':'locked_violation','issues':[
                 {'code':'locked_violation','severity':'error','day':None,'activityId':pid,'message':message,'options':[]} for pid,message in problems]})
     elif data.baseRevision!=0:
         raise HTTPException(409,'草案基准版本已失效，请重新生成')
+    elif data.shiftFixedDay is not None:
+        raise HTTPException(422, '固定安排顺延需要已有的云端行程')
     routes={}
     for i,day in enumerate(candidate.days):
         if len(day.activities)>1:routes[i]=await request.app.state.router.route(route_body(candidate,day))

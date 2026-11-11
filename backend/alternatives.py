@@ -130,7 +130,7 @@ class PlanSearch:
                 a['id']=str(uuid.uuid5(self.namespace,identity))
                 if id in self.body.candidateIds:
                     rec=recommended(self.pois[id])
-                    a['duration']=rec if profile in ('immersive','relaxed') else max(minimum(self.pois[id]),math.floor(rec*.8/15)*15)
+                    a['duration']=max(minimum(self.pois[id]),math.floor(rec*.8/15)*15) if profile=='relaxed' else rec
         return self.validate(data)
 
     def fit(self,trip,routes,profile):
@@ -155,7 +155,9 @@ class PlanSearch:
         errors=sum(i['severity']=='error' for i in item['issues'])
         if profile=='less-walking':value=((m['walkingKm'] if m['walkingKm'] is not None else 10000),m['travelMinutes'],-count,-m['visitMinutes'])
         elif profile=='immersive':value=(-count,-m['visitMinutes'],m['travelMinutes'])
-        else:value=(max((d['visitMinutes']+d['travelMinutes'] for d in m['days']),default=0),-min(d['freeMinutes'] for d in m['days']),m['travelMinutes'])
+        else:value=(-min(d['freeMinutes'] for d in m['days']),
+                    max(d['visitMinutes']+d['travelMinutes'] for d in m['days']),
+                    m['travelMinutes'])
         return (errors,*value)
 
     async def consider(self,shape,profile):

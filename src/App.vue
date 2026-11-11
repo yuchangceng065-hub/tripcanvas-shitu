@@ -66,6 +66,7 @@ import {
   extractVisitQuery,
   isDiningPlace,
   normalizePlaceQuery,
+  rankVisitPlaces,
   visitProposal,
 } from "./placeIntent";
 import { handleComposerKeydown } from "./composerKeyboard";
@@ -639,7 +640,7 @@ async function lookupVisitPlaces(
   );
   visitSearch.value = {
     query: q,
-    places: dining ? unique.slice(0, 5) : unique,
+    places: dining ? unique.slice(0, 5) : rankVisitPlaces(q, unique),
     dining,
     tripId: before.id,
     revision: before.revision,
@@ -938,14 +939,30 @@ async function changeDepartureOption(
     busy.value = false;
   }
 }
-function useEarlierStart() {
+async function useEarlierStart() {
   const p = proposal.value;
-  if (!p || p.baseRevision !== trip.value.revision) {
+  if (busy.value) return;
+  if (!p || p.baseRevision !== trip.value.revision || p.coordination?.earlierStart === undefined) {
     notify("行程已变化，请重新生成");
     return;
   }
+  const before = clone(trip.value);
   try {
-    const next = earlierProposal(p);
+    let next: Proposal;
+    if (p.departure) {
+      busy.value = true;
+      busyText.value = "正在核验较短的顺延幅度…";
+      const { day, shiftFixed, extendEnd } = p.departure;
+      const delay = p.coordination.earlierStart - before.days[day]!.start;
+      next = await coordinateProposal(
+        before,
+        departureProposal(before, day, delay, proposalRoutes.value, { shiftFixed, extendEnd }),
+        day,
+        proposalRoutes.value,
+        loadRoute,
+      );
+      assertCurrent(before, day);
+    } else next = earlierProposal(p);
     const violations = coordinationViolations(
       trip.value,
       next,
@@ -953,9 +970,13 @@ function useEarlierStart() {
     );
     if (violations.length) throw new Error(violations.join("；"));
     proposal.value = next;
-    response.value = "已预览提前出发的备选方案，原行程尚未修改。";
+    response.value = p.departure
+      ? "已预览较短的顺延幅度，确认后应用。"
+      : "已预览提前出发的备选方案，原行程尚未修改。";
   } catch (e) {
     notify((e as Error).message);
+  } finally {
+    busy.value = false;
   }
 }
 async function applyProposal() {
@@ -1005,7 +1026,12 @@ async function applyProposal() {
   if (backend.value && user.value) {
     busy.value = true;
     try {
-      const result = await confirmTrip(p.trip, p.baseRevision, p.runId);
+      const result = await confirmTrip(
+        p.trip,
+        p.baseRevision,
+        p.runId,
+        p.departure?.shiftFixed ? p.departure.day : undefined,
+      );
       registerPlaces(result.trip.placeSnapshots);
       applied = result.trip;
     } catch (e) {
@@ -2056,7 +2082,9 @@ onMounted(async () => {
                 ><span>{{
                   proposal.coordination.resolved
                     ? "已核验道路时间并保留锁定安排，具体变化如下。"
-                    : "当前固定条件下尚未找到可行安排，可选择下方备选出发时间，或调整锁定条件。"
+                    : proposal.coordination.earlierStart !== undefined
+                      ? "当前条件下原调整仍有冲突，可先预览下方备选出发时间。"
+                      : "当前条件下仍有冲突，请调整出发时间或未锁定安排。"
                 }}</span
                 ><span
                   v-for="warning in proposal.coordination.warnings"

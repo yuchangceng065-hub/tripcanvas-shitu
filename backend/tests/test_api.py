@@ -664,6 +664,37 @@ def test_confirm_still_works_without_a_run_id(client):
                        json={'trip':t,'baseRevision':0}).status_code==200
 
 
+def test_explicit_departure_shift_can_move_lunch_but_not_return(client, monkeypatch):
+    register(client)
+
+    async def roads(body):
+        return {'source': 'osrm', 'legs': [{'minutes': 10, 'distance': 1} for _ in body.placeIds[1:]]}
+
+    monkeypatch.setattr(app.state.router, 'route', roads)
+    original = trip()
+    original['requirements'] = {
+        'city': '杭州', 'startDate': '2026-11-07', 'days': 1, 'people': 2,
+        'mode': 'walk', 'destinationPlaceId': 'station', 'returnBy': 1020,
+    }
+    original['days'][0]['activities'].append({
+        'id': 'return', 'placeId': 'station', 'duration': 15, 'lock': 'fixed', 'fixedStart': 1020,
+    })
+    saved = client.post('/api/v1/planner/confirm', json={'trip': original, 'baseRevision': 0})
+    assert saved.status_code == 200, saved.text
+    shifted = copy.deepcopy(saved.json()['trip'])
+    shifted['days'][0]['start'] += 60
+    shifted['days'][0]['activities'][1]['fixedStart'] += 60
+    body = {'trip': shifted, 'baseRevision': 1}
+    assert client.post('/api/v1/planner/confirm', json=body).status_code == 422
+    bad_return = copy.deepcopy(shifted)
+    bad_return['days'][0]['activities'][-1]['fixedStart'] += 60
+    blocked = client.post('/api/v1/planner/confirm', json={**body, 'trip': bad_return, 'shiftFixedDay': 0})
+    assert blocked.status_code == 422
+    accepted = client.post('/api/v1/planner/confirm', json={**body, 'shiftFixedDay': 0})
+    assert accepted.status_code == 200, accepted.text
+    assert [a.get('fixedStart') for a in accepted.json()['trip']['days'][0]['activities']] == [None, 840, 1020]
+
+
 def test_preferences_fill_only_missing_soft_fields():
     from backend.preferences import apply_preferences
     facts={'pace':None,'interests':[],'walkBudgetKm':None}

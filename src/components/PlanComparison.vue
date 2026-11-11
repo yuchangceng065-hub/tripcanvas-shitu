@@ -31,6 +31,10 @@ const strategyLabels: Record<string, string> = {
   immersive: "充分游览",
   relaxed: "轻松休闲",
 };
+const segmentLabels = { walk: "步行", drive: "驾车", transfer: "停车／取车" };
+function distanceLabel(km: number) {
+  return km < 1 ? `${Math.round(km * 1000)} 米` : `${km.toFixed(1)} km`;
+}
 </script>
 <template>
   <section class="plan-comparison" aria-label="真实路线方案比较">
@@ -82,6 +86,21 @@ const strategyLabels: Record<string, string> = {
             >
           </p>
         </div>
+        <details v-if="Object.keys(option.routes).length" class="time-comparison">
+          <summary>查看分段交通</summary>
+          <div v-for="(road, day) in option.routes" :key="day" class="option-days">
+            <p><strong>Day {{ Number(day) + 1 }}</strong></p>
+            <p v-for="(leg, index) in road.legs" :key="index">
+              <strong>{{ name(road.placeIds[index]!) }} → {{ name(road.placeIds[index + 1]!) }}</strong>
+              <small>{{ durationLabel(leg.minutes) }} · {{ distanceLabel(leg.distance) }}</small>
+              <small v-if="leg.segments?.length">
+                {{ leg.segments.map((segment) =>
+                  `${segmentLabels[segment.mode]} ${durationLabel(segment.minutes)}${segment.distance ? " · " + distanceLabel(segment.distance) : ""}`
+                ).join(" / ") }}
+              </small>
+            </p>
+          </div>
+        </details>
         <p class="option-tradeoff">
           <strong>{{ option.includedIds.length }} 个游览地点</strong
           ><span v-if="option.omittedIds.length">

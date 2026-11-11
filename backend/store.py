@@ -127,9 +127,11 @@ def persist_trip(s: Session, user, trip: Trip, *, commit=True, base_revision=Non
     return trip.revision, True
 
 
-def locked_violations(before, after):
+def locked_violations(before, after, *, shift_fixed_day=None):
     problems = []
-    for day in before.days:
+    requirements = before.requirements
+    anchors = {requirements.originPlaceId, requirements.destinationPlaceId} if requirements else set()
+    for index, day in enumerate(before.days):
         for a in day.activities:
             if a.lock == 'none':
                 continue
@@ -137,8 +139,15 @@ def locked_violations(before, after):
             b = match[1] if match else None
             if not b or b.placeId != a.placeId or b.lock != a.lock:
                 problems.append((a.id, '锁定或必须保留的地点不能移除或替换'))
-            elif a.lock == 'fixed' and (match[0].date != day.date or b.fixedStart != a.fixedStart or b.duration != a.duration):
-                problems.append((a.id, '固定安排的日期、时间与停留时长不能修改'))
+            elif a.lock == 'fixed':
+                time_changed = b.fixedStart != a.fixedStart
+                can_shift = (
+                    time_changed and index == shift_fixed_day and a.placeId not in anchors
+                    and POIS[a.placeId]['kind'] != '返程'
+                    and b.fixedStart >= a.fixedStart + (after.days[index].start - day.start)
+                )
+                if match[0].date != day.date or b.duration != a.duration or (time_changed and not can_shift):
+                    problems.append((a.id, '固定安排的日期、时间与停留时长不能修改'))
     return problems
 
 

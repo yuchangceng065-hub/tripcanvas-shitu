@@ -1,5 +1,6 @@
 import {
   clone,
+  departureProposal,
   lockedChanges,
   placeById,
   validate,
@@ -246,6 +247,27 @@ function latestEarlierStart(
   }
   return low < limit ? low : undefined;
 }
+
+function shorterDelayStart(
+  before: Trip,
+  departure: NonNullable<Proposal["departure"]>,
+  routes: RouteMap,
+): number | undefined {
+  const { day, delay, shiftFixed, extendEnd } = departure;
+  const feasible = (minutes: number) => {
+    const trial = departureProposal(before, day, minutes, routes, { shiftFixed, extendEnd });
+    return !errors(fitDurations(trial.trip, day, routes), day, routes).length;
+  };
+  if (delay <= 1 || !feasible(1)) return;
+  let low = 1,
+    high = delay - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (feasible(mid)) low = mid;
+    else high = mid - 1;
+  }
+  return before.days[day]!.start + low;
+}
 export async function coordinateProposal(
   before: Trip,
   input: Proposal,
@@ -313,8 +335,12 @@ export async function coordinateProposal(
       changes,
       resolved,
       warnings,
-      ...(!resolved && !input.departure
-        ? { earlierStart: latestEarlierStart(basis, day, routes) }
+      ...(!resolved
+        ? {
+            earlierStart: input.departure
+              ? shorterDelayStart(before, input.departure, routes)
+              : latestEarlierStart(basis, day, routes),
+          }
         : {}),
     },
   };
