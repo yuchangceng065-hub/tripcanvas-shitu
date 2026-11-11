@@ -67,11 +67,25 @@ HTTPS_PROXY=http://127.0.0.1:7890 .venv/bin/python scripts/evaluate_live.py \
 | 合成 Agent 样本 | `scripts/evaluate_agent.py` | 桩模型下的逐条 verdict，不是准确率 |
 | 脱敏真实任务 | `scripts/evaluate_real_tasks.py` | 四象限 verdict、`processPass` / `outcomePass` 分开列、覆盖率 |
 
-`fixtures/evaluation/real-tasks/v1.json` 由 `scripts/build_real_task_suite.py` 从 `capture_live_run.py` 的线上采集构建：账号名、API 地址、UUID 全部清除或替换为稳定别名；只保留 oracle 需要的事件、终态、方案与显式写入证据。每个任务的**运行前预期**（`spec`）单独存一份 SHA256，评测时校验它没有被事后改写——预期绝不能从运行结果反推。
+### 脱敏真实任务与版本对比
+
+`fixtures/evaluation/real-tasks/v1.json` 收录四次线上执行与一次隔离环境的故障注入。构建器清除账号名、API 地址，将 UUID 替换为稳定别名。每个任务保存运行前预期及其 SHA256，评测时核对预期与采集记录的一致性。
+
+| 场景 | 来源 | 过程与结果 |
+| --- | --- | --- |
+| 规划成功 | 线上 Groq、高德、PostgreSQL | `both_pass`，确认保存后只有一个版本和一条确认事件 |
+| 反问续接 | 线上 | `both_pass`，回复后沿用同一运行，版本从 1 增至 2，进入需求确认 |
+| 不可行约束 | 线上 | `result_only`，15 分钟时段无法容纳两个必去地点，路线核验发现超时。Agent 又尝试一次修复并请求放宽条件，与预设直接终止的过程不同。未生成方案，未写入 |
+| 工具失败 | 隔离 API，使用脚本模型并注入地图 503 | `both_pass`，MCP 记录核验失败，Agent 给出终止结果，未写入 |
+| 断线恢复 | 线上 | `both_pass`，客户端关闭事件流，从已读游标补齐后续事件 |
 
 ```sh
-# 生成/刷新脱敏套件（缺采集的分类保持 not_captured，不编造轨迹）
-.venv/bin/python scripts/build_real_task_suite.py --use-known-captures
+# 采集一个指定线上场景
+.venv/bin/python scripts/capture_real_task_paths.py \
+  --category reconnect_recovery --output-dir /tmp/tripcanvas-captures
+# 采集隔离环境的工具失败
+.venv/bin/python scripts/evaluate_agent.py \
+  --capture-tool-failure /tmp/tripcanvas-captures/tool_failure.json
 # 评测某一代码版本
 .venv/bin/python scripts/evaluate_real_tasks.py --version <commit> --output /tmp/real-v1.json
 # 用同一套任务集比较两版，输出逐任务 improved / regressed / unchanged
@@ -79,15 +93,15 @@ HTTPS_PROXY=http://127.0.0.1:7890 .venv/bin/python scripts/evaluate_live.py \
   --baseline /tmp/real-v1.json --output /tmp/real-v2.json --fail-on-regression
 ```
 
-套件声明 5 个分类：规划成功、反问续接、不可行约束、工具失败、断线恢复。当前只有前两类有真实线上采集；其余三类是**覆盖率缺口**，报告为 `not_captured` 而不是失败，需要部署恢复后按 `captureHint` 补齐。版本对比要求两份报告的 `suiteSha256` 一致，`sameSuite=false` 时只作提示、不把结论当回归。
+当前覆盖 **5/5**，过程达标 **4/5**，结果达标 **5/5**。这些数字描述这五次有记录的执行。每条采集的环境见数据集 `source` 字段，线上提交见 `release` 字段。版本对比要求两份报告的 `suiteSha256` 一致。
 
 ### 一键验证入口
 
 `scripts/verify.sh` 固化了全套基线（顺序与 CI 一致），避免每次手敲命令或漏参数：
 
 ```sh
-bash scripts/verify.sh             # 全量：lint / 后端 269 / 前端 124 / typecheck / build / 四类评测 / 空库迁移 / diff-check
+bash scripts/verify.sh             # 全量：lint / 测试 / typecheck / build / 四类评测 / 空库迁移 / diff-check
 bash scripts/verify.sh --quick     # 后端 + 评测（跳过前端与构建）
 ```
 
-脚本为本机沙箱的 `tmp_path` 冲突统一传入 `--basetemp=/tmp/tc-verify-*`（环境问题，非产品缺陷），并显式打印真实任务集的 3 个 `not_captured` 分类，防止把覆盖缺口误读成"全部通过"。四类评测仍各自独立输出，脚本不做任何合并。
+脚本会打印各套评测的独立报告，包括真实任务集的覆盖率与逐条四象限判定。

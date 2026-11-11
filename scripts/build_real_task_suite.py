@@ -34,9 +34,9 @@ from backend.trajectory_export import DEFAULT_ALLOWED_TOOLS  # noqa: E402
 
 CATEGORIES = {
     'plan_success': ('规划成功', 'completed', True, True, True, ['quyuan', 'museum', 'station']),
-    'clarification_resume': ('反问续接', 'needs_input', False, False, False, ['quyuan', 'station']),
+    'clarification_resume': ('反问续接', 'needs_confirmation', False, False, False, ['quyuan', 'amap:B023B0253E']),
     'infeasible_constraint': ('不可行约束', 'gave_up', False, False, False, ['quyuan', 'station']),
-    'tool_failure': ('工具失败', 'failed', False, False, False, ['quyuan', 'station']),
+    'tool_failure': ('工具失败', 'gave_up', False, False, False, ['quyuan', 'museum', 'station']),
     'reconnect_recovery': ('断线恢复', 'needs_input', False, False, False, ['quyuan', 'station']),
 }
 DEFAULT_CAPTURE_DIR = ROOT.parent
@@ -92,6 +92,14 @@ def declared_spec(category: str) -> dict:
     }
     if expect_proposal:
         spec['days'] = 1
+    if category == 'clarification_resume':
+        spec['requireResume'] = True
+    if category == 'reconnect_recovery':
+        spec['requireSseReplay'] = True
+    if category in ('infeasible_constraint', 'tool_failure'):
+        spec['expectedMcpFailures'] = ['validate_plan']
+    if category == 'infeasible_constraint':
+        spec['requiredIssueCode'] = 'day_overflow'
     return spec
 
 
@@ -118,12 +126,15 @@ def capture_from_file(path: Path, category: str) -> dict:
         'confirmation': _clean(spec.get('confirmation')),
     }
     return {
+        'declaredAt': raw.get('declaredAt', raw.get('capturedAt')),
         'observedAt': raw.get('capturedAt'),
-        'source': 'live API payload, desensitized',
+        'source': _clean(raw.get('source', 'live API payload, desensitized')),
+        'release': (raw.get('healthAtCapture') or {}).get('commit'),
         'runAlias': _alias(str(item['runId'])),
         'eventCount': len(events),
         'events': events,
         'result': result,
+        'evidence': _clean(item.get('evidence', {})),
         'spec': _clean(spec),
         'specSha256': _sha(_clean(spec)),
     }
@@ -142,7 +153,7 @@ def build(output: Path, captures: dict[str, Path]) -> dict:
             'id': f'R{order:02d}',
             'category': category,
             'title': label,
-            'declaredAt': captured['observedAt'] if captured else SUITE_DECLARED_AT,
+            'declaredAt': captured['declaredAt'] if captured else SUITE_DECLARED_AT,
             'expectationSource': 'pre-run request inputs (never derived from the observed result)',
             'spec': spec,
             'expectationSha256': _sha(spec),
@@ -156,7 +167,7 @@ def build(output: Path, captures: dict[str, Path]) -> dict:
         })
     suite = {
         'suite': 'real-tasks/v1',
-        'description': ('Desensitized real Agent tasks. Expectations are declared before the '
+        'description': ('Desensitized Agent executions from live and isolated environments. Expectations precede the '
                          'run; process and outcome are evaluated separately. Version comparison '
                          'replays this same suite against two code versions.'),
         'declaredAt': SUITE_DECLARED_AT,

@@ -244,10 +244,32 @@ def _process_checks(case: dict) -> list[dict]:
         add('mcp_tool_allowlist', not bad_mcp, ','.join(bad_mcp))
         failed_mcp = [event for event in mcp
                       if _detail(event).get('ok') is False or event['status'] == 'error']
-        add('mcp_call_results_ok', not failed_mcp, f'failed={len(failed_mcp)}')
+        expected_failures = sorted(expect.get('expectedMcpFailures', []))
+        failed_tools = sorted(str(_detail(event).get('tool')) for event in failed_mcp)
+        add('mcp_call_results_ok', failed_tools == expected_failures,
+            f'failed={failed_tools} expected={expected_failures}')
     else:
         add('mcp_tool_allowlist', True, 'no mcp_call in this run')
-        add('mcp_call_results_ok', True, 'no mcp_call in this run')
+        add('mcp_call_results_ok', not expect.get('expectedMcpFailures'), 'no mcp_call in this run')
+
+    evidence = result.get('evidence', {})
+    if expect.get('requireResume'):
+        resume = evidence.get('resumedVersion')
+        reply = evidence.get('replyVersion')
+        add('clarification_resumed_same_run',
+            evidence.get('pausedStatus') == 'needs_input' and evidence.get('sameRun') is True
+            and isinstance(resume, int) and isinstance(reply, int) and resume > reply
+            and any(event['phase'] == 'graph_resume' for event in events))
+    if expect.get('requireSseReplay'):
+        cursor = evidence.get('cursor')
+        replay = evidence.get('replayedIds')
+        add('sse_cursor_replayed_exactly_once',
+            sequence_ok and isinstance(cursor, int) and cursor in seqs and bool(replay)
+            and replay == [seq for seq in seqs if seq > cursor])
+    if required_issue := expect.get('requiredIssueCode'):
+        issues = [issue.get('code') for event in events if event['phase'] == 'tool_result'
+                  for issue in _detail(event).get('summary', {}).get('issues', [])]
+        add('infeasible_constraint_detected', required_issue in issues)
 
     searches = [event for event in events if event['phase'] == 'place_search']
     refines = [event for event in events if event['phase'] == 'search_refine']
@@ -265,8 +287,9 @@ def _process_checks(case: dict) -> list[dict]:
     trailing_pauses = ([event for event in core[last_terminal_index + 1:]
                         if event['phase'] in TRAILING_META_PHASES]
                        if last_terminal_index is not None else [])
+    checkpoint_status = 'review' if terminal == 'needs_confirmation' else terminal
     add('trailing_pause_matches_status',
-        all(_detail(event).get('status') == terminal for event in trailing_pauses),
+        all(_detail(event).get('status') in (terminal, checkpoint_status) for event in trailing_pauses),
         f'trailing_pauses={len(trailing_pauses)}')
 
     return checks
@@ -277,6 +300,8 @@ def _outcome_check(case: dict) -> tuple[bool, list[str]]:
     expect = case['expect']
     plan = case['result'].get('plan')
     reasons: list[str] = []
+    if 'written' in expect and bool(case['result'].get('written')) != expect['written']:
+        reasons.append('write_status_mismatch')
     if expect.get('expectProposal'):
         if not isinstance(plan, dict) or not _places_in_plan(plan):
             reasons.append('missing_proposal')

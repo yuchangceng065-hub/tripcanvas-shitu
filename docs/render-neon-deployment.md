@@ -36,7 +36,7 @@
 
 Render Docker 实例在开始接收请求前执行 Alembic。对于旧版由 ORM 创建、且列结构与已知旧版一致的数据库，启动时登记原有版本，再补齐 `runs.generation`。遇到无法识别的结构时启动会报错，便于核对数据库。已有数据应通过 Neon 的备份或分支保留。应用回滚到旧版时可以保留新增列。
 
-发布后读取 `/api/v1/health` 核对后端提交。公开演示使用 `https://yuchangceng065-hub.github.io` 作为浏览器来源，Render 实际运行环境的 `FRONTEND_ORIGINS` 要包含该来源和现有 Sites 来源。
+发布后读取 `/api/v1/health` 核对后端提交。Blueprint 的 `FRONTEND_ORIGINS` 包含 GitHub Pages 和 Sites 来源。先前手动创建的 Render 服务使用 `RENDER_EXTERNAL_HOSTNAME` 补齐 GitHub Pages 来源，限定为 `tripcanvas-api.onrender.com`。
 
 用独立 QA 账号运行以下采集，`<commit>` 填后端发布的完整提交。它验证重复确认只生成一个版本和一条对应的确认事件。采集会留下 QA 运行记录与一条测试行程。
 

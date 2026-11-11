@@ -1,6 +1,6 @@
 {
   "suite": "real-tasks/v1",
-  "description": "Desensitized real Agent tasks. Expectations are declared before the run; process and outcome are evaluated separately. Version comparison replays this same suite against two code versions.",
+  "description": "Desensitized Agent executions from live and isolated environments. Expectations precede the run; process and outcome are evaluated separately. Version comparison replays this same suite against two code versions.",
   "declaredAt": "2026-11-07T00:00:00+00:00",
   "familiesAreSeparate": true,
   "tasks": [
@@ -8,7 +8,7 @@
       "id": "R01",
       "category": "plan_success",
       "title": "规划成功",
-      "declaredAt": "2026-11-06T19:17:50.020736+00:00",
+      "declaredAt": "2026-11-11T11:20:50.442386+00:00",
       "expectationSource": "pre-run request inputs (never derived from the observed result)",
       "spec": {
         "terminal": "completed",
@@ -25,8 +25,7 @@
         ],
         "allowedPlaceIds": [
           "quyuan",
-          "museum",
-          "station"
+          "museum"
         ],
         "allowedPlaceIdsSource": "explicit --allowed-place-ids (pre-run confirmed candidate set + anchors)",
         "requiredPlaceIds": [
@@ -39,26 +38,26 @@
         "requireValidationBeforeProposal": true,
         "written": true,
         "confirmation": {
-          "source": "POST /api/v1/planner/confirm (live API response)",
-          "httpStatus": 200,
           "tripId": "<id>",
           "revision": 1,
           "idempotent": false,
-          "writeProbe": "GET /api/v1/trips/{id}",
-          "observedAt": "2026-11-06T19:17:49.589630+00:00",
-          "note": "Deployed build does not emit a confirmed run event; evidence comes from the authoritative confirm response, never from the run's completed event.",
+          "source": "confirmed run event",
+          "at": 1794396047.3076131,
+          "httpStatus": 200,
           "writeProbeStatus": 200
         },
         "title": "线上完整规划→确认→保存运行",
         "days": 1
       },
-      "expectationSha256": "ce05ab293422b7268a33fe4f2be03407541d24db42e4f5c4a463a6908ac7ef3d",
+      "expectationSha256": "1ddd3fec2e823d2ec83069d1423b0ed7c257ecc6024282b884c06441927bda31",
       "coverage": "captured",
       "capture": {
-        "observedAt": "2026-11-06T19:17:50.020736+00:00",
+        "declaredAt": "2026-11-11T11:20:50.442386+00:00",
+        "observedAt": "2026-11-11T11:20:50.442386+00:00",
         "source": "live API payload, desensitized",
-        "runAlias": "live-4abc06c153",
-        "eventCount": 19,
+        "release": "a66cf141cfa8",
+        "runAlias": "live-576c5d4f50",
+        "eventCount": 20,
         "events": [
           {
             "seq": 1,
@@ -110,7 +109,7 @@
             "detail": {
               "tool": "route_day",
               "ok": true,
-              "durationMs": 1879,
+              "durationMs": 3121,
               "transport": "streamable-http"
             }
           },
@@ -186,7 +185,7 @@
             "detail": {
               "tool": "validate_plan",
               "ok": true,
-              "durationMs": 8,
+              "durationMs": 44,
               "transport": "streamable-http"
             }
           },
@@ -271,7 +270,7 @@
                     "museum"
                   ]
                 ],
-                "summary": "曲院风荷与浙江省博物馆一天轻松游览"
+                "summary": "曲院风荷与浙江省博物馆一日轻松游览"
               }
             }
           },
@@ -282,7 +281,7 @@
             "detail": {
               "tool": "validate_plan",
               "ok": true,
-              "durationMs": 52,
+              "durationMs": 59,
               "transport": "streamable-http"
             }
           },
@@ -304,6 +303,18 @@
             "status": "ok",
             "detail": {
               "steps": 19
+            }
+          },
+          {
+            "seq": 20,
+            "phase": "confirmed",
+            "status": "ok",
+            "detail": {
+              "tripId": "<id>",
+              "revision": 1,
+              "idempotent": false,
+              "source": "planner/confirm",
+              "at": 1794396047.3076131
             }
           }
         ],
@@ -334,18 +345,17 @@
             ]
           },
           "confirmation": {
-            "source": "POST /api/v1/planner/confirm (live API response)",
-            "httpStatus": 200,
             "tripId": "<id>",
             "revision": 1,
             "idempotent": false,
-            "writeProbe": "GET /api/v1/trips/{id}",
-            "observedAt": "2026-11-06T19:17:49.589630+00:00",
-            "note": "Deployed build does not emit a confirmed run event; evidence comes from the authoritative confirm response, never from the run's completed event.",
+            "source": "confirmed run event",
+            "at": 1794396047.3076131,
+            "httpStatus": 200,
             "writeProbeStatus": 200
           }
         },
-        "specSha256": "ce05ab293422b7268a33fe4f2be03407541d24db42e4f5c4a463a6908ac7ef3d"
+        "evidence": {},
+        "specSha256": "1ddd3fec2e823d2ec83069d1423b0ed7c257ecc6024282b884c06441927bda31"
       },
       "captureHint": null
     },
@@ -353,10 +363,11 @@
       "id": "R02",
       "category": "clarification_resume",
       "title": "反问续接",
-      "declaredAt": "2026-11-06T18:53:33.695229+00:00",
+      "declaredAt": "2026-11-11T12:11:48.528987+00:00",
       "expectationSource": "pre-run request inputs (never derived from the observed result)",
       "spec": {
-        "terminal": "needs_input",
+        "title": "反问续接",
+        "terminal": "needs_confirmation",
         "allowedTools": [
           "route_day",
           "validate_plan",
@@ -370,24 +381,27 @@
         ],
         "allowedPlaceIds": [
           "quyuan",
-          "station"
+          "museum",
+          "amap:B023B0253E"
         ],
-        "allowedPlaceIdsSource": "place mentions in the pre-run request text",
+        "allowedPlaceIdsSource": "explicit QA candidates fixed before execution",
         "requiredPlaceIds": [],
         "expectProposal": false,
+        "requireValidationBeforeProposal": false,
         "maxSteps": 6,
         "maxToolCalls": 6,
-        "requireValidationBeforeProposal": false,
         "written": false,
-        "title": "线上真实对话运行"
+        "requireResume": true
       },
-      "expectationSha256": "fce8ea6d63ea805b28df5b40890263c24f014a4f2c62044bcbc8d991ac158f88",
+      "expectationSha256": "81d9b0e6c79599f11e52d4a3e3cfb5ae2d649cc086e30e688165f204db2560d8",
       "coverage": "captured",
       "capture": {
-        "observedAt": "2026-11-06T18:53:33.695229+00:00",
+        "declaredAt": "2026-11-11T12:11:48.528987+00:00",
+        "observedAt": "2026-11-11T12:12:07.118270+00:00",
         "source": "live API payload, desensitized",
-        "runAlias": "live-ad77331bd6",
-        "eventCount": 17,
+        "release": "429ba5da2e50",
+        "runAlias": "live-302f743a39",
+        "eventCount": 26,
         "events": [
           {
             "seq": 1,
@@ -431,88 +445,89 @@
             "detail": {
               "tool": "search_places",
               "ok": true,
-              "durationMs": 16,
+              "durationMs": 53,
               "transport": "streamable-http"
             }
           },
           {
             "seq": 6,
-            "phase": "place_search",
-            "status": "ok",
-            "detail": {
-              "count": 2,
-              "query": "杭州东站"
-            }
-          },
-          {
-            "seq": 7,
-            "phase": "mcp_call",
-            "status": "ok",
-            "detail": {
-              "tool": "search_places",
-              "ok": true,
-              "durationMs": 7,
-              "transport": "streamable-http"
-            }
-          },
-          {
-            "seq": 8,
             "phase": "search_refine",
             "status": "ok",
             "detail": {
               "round": 1,
-              "mentions": 2
+              "mentions": 1
+            }
+          },
+          {
+            "seq": 7,
+            "phase": "place_search",
+            "status": "ok",
+            "detail": {
+              "count": 2,
+              "query": "杭州西湖风景名胜区 曲院风荷 主入口",
+              "refine": true
+            }
+          },
+          {
+            "seq": 8,
+            "phase": "mcp_call",
+            "status": "ok",
+            "detail": {
+              "tool": "search_places",
+              "ok": true,
+              "durationMs": 3580,
+              "transport": "streamable-http"
             }
           },
           {
             "seq": 9,
-            "phase": "place_search",
-            "status": "ok",
-            "detail": {
-              "count": 3,
-              "query": "曲院风荷 入口",
-              "refine": true
-            }
-          },
-          {
-            "seq": 10,
-            "phase": "mcp_call",
-            "status": "ok",
-            "detail": {
-              "tool": "search_places",
-              "ok": true,
-              "durationMs": 5,
-              "transport": "streamable-http"
-            }
-          },
-          {
-            "seq": 11,
-            "phase": "place_search",
-            "status": "ok",
-            "detail": {
-              "count": 4,
-              "query": "杭州东站 入口",
-              "refine": true
-            }
-          },
-          {
-            "seq": 12,
-            "phase": "mcp_call",
-            "status": "ok",
-            "detail": {
-              "tool": "search_places",
-              "ok": true,
-              "durationMs": 27,
-              "transport": "streamable-http"
-            }
-          },
-          {
-            "seq": 13,
             "phase": "search_refine",
             "status": "ok",
             "detail": {
               "round": 2,
-              "mentions": 2
+              "mentions": 1
+            }
+          },
+          {
+            "seq": 10,
+            "phase": "place_search",
+            "status": "ok",
+            "detail": {
+              "count": 3,
+              "query": "曲院风荷主入口",
+              "refine": true
+            }
+          },
+          {
+            "seq": 11,
+            "phase": "mcp_call",
+            "status": "ok",
+            "detail": {
+              "tool": "search_places",
+              "ok": true,
+              "durationMs": 943,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 12,
+            "phase": "place_search",
+            "status": "ok",
+            "detail": {
+              "count": 4,
+              "query": "曲院风荷三号门停车点",
+              "refine": true
+            }
+          },
+          {
+            "seq": 13,
+            "phase": "mcp_call",
+            "status": "ok",
+            "detail": {
+              "tool": "search_places",
+              "ok": true,
+              "durationMs": 1611,
+              "transport": "streamable-http"
             }
           },
           {
@@ -530,9 +545,9 @@
             "status": "ok",
             "detail": {
               "missing": [
-                "place:15b6b1c55dbcaf4b",
-                "place:366608ddb0b415d0",
-                "return"
+                "people",
+                "mode",
+                "place:15b6b1c55dbcaf4b"
               ],
               "ready": false
             }
@@ -553,15 +568,98 @@
               "status": "needs_input",
               "engine": "langgraph"
             }
+          },
+          {
+            "seq": 18,
+            "phase": "resumed",
+            "status": "ok",
+            "detail": {}
+          },
+          {
+            "seq": 19,
+            "phase": "graph_resume",
+            "status": "ok",
+            "detail": {
+              "engine": "langgraph",
+              "version": 2
+            }
+          },
+          {
+            "seq": 20,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "understand",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 21,
+            "phase": "understanding",
+            "status": "ok",
+            "detail": {
+              "attempt": 1
+            }
+          },
+          {
+            "seq": 22,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "search_places",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 23,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "review_requirements",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 24,
+            "phase": "clarification",
+            "status": "ok",
+            "detail": {
+              "missing": [],
+              "ready": true
+            }
+          },
+          {
+            "seq": 25,
+            "phase": "needs_confirmation",
+            "status": "ok",
+            "detail": {
+              "steps": 25
+            }
+          },
+          {
+            "seq": 26,
+            "phase": "graph_pause",
+            "status": "ok",
+            "detail": {
+              "status": "review",
+              "engine": "langgraph"
+            }
           }
         ],
         "result": {
-          "status": "needs_input",
+          "status": "needs_confirmation",
           "written": false,
           "plan": null,
           "confirmation": null
         },
-        "specSha256": "fce8ea6d63ea805b28df5b40890263c24f014a4f2c62044bcbc8d991ac158f88"
+        "evidence": {
+          "pausedStatus": "needs_input",
+          "sameRun": true,
+          "replyVersion": 1,
+          "resumedVersion": 2,
+          "readBack": "needs_confirmation"
+        },
+        "specSha256": "81d9b0e6c79599f11e52d4a3e3cfb5ae2d649cc086e30e688165f204db2560d8"
       },
       "captureHint": null
     },
@@ -569,7 +667,7 @@
       "id": "R03",
       "category": "infeasible_constraint",
       "title": "不可行约束",
-      "declaredAt": "2026-11-07T00:00:00+00:00",
+      "declaredAt": "2026-11-11T12:16:08.586028+00:00",
       "expectationSource": "pre-run request inputs (never derived from the observed result)",
       "spec": {
         "title": "不可行约束",
@@ -587,30 +685,417 @@
         ],
         "allowedPlaceIds": [
           "quyuan",
-          "station"
+          "museum",
+          "amap:B023B0253E"
         ],
-        "allowedPlaceIdsSource": "place mentions / confirmed candidates in the pre-run request",
+        "allowedPlaceIdsSource": "explicit QA candidates fixed before execution",
         "requiredPlaceIds": [],
         "expectProposal": false,
         "requireValidationBeforeProposal": false,
         "maxSteps": 6,
         "maxToolCalls": 6,
-        "written": false
+        "written": false,
+        "expectedMcpFailures": [
+          "validate_plan"
+        ],
+        "requiredIssueCode": "day_overflow"
       },
-      "expectationSha256": "dc7c88d2fc666a0bfa3416970d1b2efe963377bc19e756e53da90d0f7c3f6014",
-      "coverage": "not_captured",
-      "capture": null,
-      "captureHint": "scripts/capture_live_run.py --mode full plus an explicit pre-run spec"
+      "expectationSha256": "bc53c5ffc3fc099b6fdd3c855c9aa968ad6fc4631a79145a40524a4a7258ed47",
+      "coverage": "captured",
+      "capture": {
+        "declaredAt": "2026-11-11T12:16:08.586028+00:00",
+        "observedAt": "2026-11-11T12:16:19.103481+00:00",
+        "source": "live API payload, desensitized",
+        "release": "429ba5da2e50",
+        "runAlias": "live-2bdcc51080",
+        "eventCount": 25,
+        "events": [
+          {
+            "seq": 1,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "choose_action",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 2,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "execute_tool",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 3,
+            "phase": "model",
+            "status": "ok",
+            "detail": {
+              "step": 1,
+              "action": "route_day"
+            }
+          },
+          {
+            "seq": 4,
+            "phase": "tool_call",
+            "status": "ok",
+            "detail": {
+              "step": 1,
+              "tool": "route_day",
+              "args": {
+                "placeIds": [
+                  "quyuan",
+                  "museum"
+                ],
+                "mode": "walk"
+              }
+            }
+          },
+          {
+            "seq": 5,
+            "phase": "mcp_call",
+            "status": "ok",
+            "detail": {
+              "tool": "route_day",
+              "ok": true,
+              "durationMs": 23,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 6,
+            "phase": "tool_result",
+            "status": "ok",
+            "detail": {
+              "step": 1,
+              "ok": true,
+              "summary": {
+                "minutes": 23,
+                "walkingKm": 1.663,
+                "legs": [
+                  {
+                    "minutes": 23,
+                    "distance": 1.663
+                  }
+                ],
+                "source": "amap"
+              }
+            }
+          },
+          {
+            "seq": 7,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "choose_action",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 8,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "execute_tool",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 9,
+            "phase": "model",
+            "status": "ok",
+            "detail": {
+              "step": 2,
+              "action": "validate_plan"
+            }
+          },
+          {
+            "seq": 10,
+            "phase": "tool_call",
+            "status": "ok",
+            "detail": {
+              "step": 2,
+              "tool": "validate_plan",
+              "args": {
+                "days": [
+                  [
+                    "quyuan",
+                    "museum"
+                  ]
+                ],
+                "summary": "待核验安排"
+              }
+            }
+          },
+          {
+            "seq": 11,
+            "phase": "mcp_call",
+            "status": "error",
+            "detail": {
+              "tool": "validate_plan",
+              "ok": false,
+              "durationMs": 11,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 12,
+            "phase": "tool_result",
+            "status": "ok",
+            "detail": {
+              "step": 2,
+              "ok": false,
+              "summary": {
+                "feasible": false,
+                "issues": [
+                  {
+                    "code": "day_overflow",
+                    "severity": "error",
+                    "day": 0,
+                    "activityId": "<id>",
+                    "message": "第 1 天超出结束时间 75 分钟（曲院风荷 结束于 11:00）",
+                    "options": [
+                      {
+                        "action": "extend_day",
+                        "day": 0,
+                        "minutes": 75
+                      }
+                    ]
+                  },
+                  {
+                    "code": "day_overflow",
+                    "severity": "error",
+                    "day": 0,
+                    "activityId": "<id>",
+                    "message": "第 1 天超出结束时间 188 分钟（浙江省博物馆 · 孤山馆区 结束于 12:53）",
+                    "options": [
+                      {
+                        "action": "extend_day",
+                        "day": 0,
+                        "minutes": 188
+                      }
+                    ]
+                  },
+                  {
+                    "code": "meal_break",
+                    "severity": "warning",
+                    "day": 0,
+                    "activityId": null,
+                    "message": "第 1 天 11:30—13:30 没有 40 分钟以上空档，用餐和休息可能被压缩",
+                    "options": []
+                  }
+                ],
+                "metrics": {
+                  "walkingKm": 1.663,
+                  "travelMinutes": 23,
+                  "visitMinutes": 180,
+                  "freeMinutes": 0,
+                  "days": [
+                    {
+                      "day": 0,
+                      "walkingKm": 1.663,
+                      "travelMinutes": 23,
+                      "visitMinutes": 180,
+                      "freeMinutes": 0,
+                      "finish": 773,
+                      "overMinutes": 188,
+                      "waitingMinutes": 0
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "seq": 13,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "choose_action",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 14,
+            "phase": "model_error",
+            "status": "error",
+            "detail": {
+              "step": 3,
+              "error": "供应商未生成有效 JSON，请重新输出一个动作 JSON 对象"
+            }
+          },
+          {
+            "seq": 15,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "choose_action",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 16,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "execute_tool",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 17,
+            "phase": "model",
+            "status": "ok",
+            "detail": {
+              "step": 4,
+              "action": "repair_plan"
+            }
+          },
+          {
+            "seq": 18,
+            "phase": "tool_call",
+            "status": "ok",
+            "detail": {
+              "step": 4,
+              "tool": "repair_plan",
+              "args": {
+                "seedDays": [
+                  [
+                    "quyuan",
+                    "museum"
+                  ]
+                ]
+              }
+            }
+          },
+          {
+            "seq": 19,
+            "phase": "mcp_call",
+            "status": "error",
+            "detail": {
+              "tool": "repair_plan",
+              "ok": false,
+              "durationMs": 1030,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 20,
+            "phase": "tool_result",
+            "status": "ok",
+            "detail": {
+              "step": 4,
+              "ok": false,
+              "summary": {
+                "feasible": false,
+                "search": {
+                  "evaluatedStates": 6,
+                  "dayRouteQueries": 2,
+                  "maxDayRouteQueries": 5,
+                  "limited": false,
+                  "reason": null,
+                  "routeFailures": []
+                },
+                "issues": [
+                  {
+                    "code": "day_overflow",
+                    "severity": "error",
+                    "day": 0,
+                    "activityId": "<id>",
+                    "message": "第 1 天超出结束时间 45 分钟（曲院风荷 结束于 10:30）",
+                    "options": [
+                      {
+                        "action": "extend_day",
+                        "day": 0,
+                        "minutes": 45
+                      }
+                    ]
+                  },
+                  {
+                    "code": "day_overflow",
+                    "severity": "error",
+                    "day": 0,
+                    "activityId": "<id>",
+                    "message": "第 1 天超出结束时间 128 分钟（浙江省博物馆 · 孤山馆区 结束于 11:53）",
+                    "options": [
+                      {
+                        "action": "extend_day",
+                        "day": 0,
+                        "minutes": 128
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "seq": 21,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "choose_action",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 22,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "execute_tool",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 23,
+            "phase": "model",
+            "status": "ok",
+            "detail": {
+              "step": 5,
+              "action": "need_input"
+            }
+          },
+          {
+            "seq": 24,
+            "phase": "needs_input",
+            "status": "ok",
+            "detail": {
+              "steps": 24
+            }
+          },
+          {
+            "seq": 25,
+            "phase": "graph_pause",
+            "status": "ok",
+            "detail": {
+              "status": "needs_input",
+              "engine": "langgraph"
+            }
+          }
+        ],
+        "result": {
+          "status": "needs_input",
+          "written": false,
+          "plan": null,
+          "confirmation": null
+        },
+        "evidence": {},
+        "specSha256": "bc53c5ffc3fc099b6fdd3c855c9aa968ad6fc4631a79145a40524a4a7258ed47"
+      },
+      "captureHint": null
     },
     {
       "id": "R04",
       "category": "tool_failure",
       "title": "工具失败",
-      "declaredAt": "2026-11-07T00:00:00+00:00",
+      "declaredAt": "2026-11-11T12:15:18.077823+00:00",
       "expectationSource": "pre-run request inputs (never derived from the observed result)",
       "spec": {
         "title": "工具失败",
-        "terminal": "failed",
+        "terminal": "gave_up",
         "allowedTools": [
           "route_day",
           "validate_plan",
@@ -624,6 +1109,7 @@
         ],
         "allowedPlaceIds": [
           "quyuan",
+          "museum",
           "station"
         ],
         "allowedPlaceIdsSource": "place mentions / confirmed candidates in the pre-run request",
@@ -632,18 +1118,360 @@
         "requireValidationBeforeProposal": false,
         "maxSteps": 6,
         "maxToolCalls": 6,
-        "written": false
+        "written": false,
+        "expectedMcpFailures": [
+          "validate_plan"
+        ]
       },
-      "expectationSha256": "3d2d4ccdbe4950172d37acb20fbef55dd78640a5d577980f57cebb9b009f7863",
-      "coverage": "not_captured",
-      "capture": null,
-      "captureHint": "scripts/capture_live_run.py --mode full plus an explicit pre-run spec"
+      "expectationSha256": "45818ee55e483c221ddb1cd93ec73dd81dee2af490063f335497818b0200977b",
+      "coverage": "captured",
+      "capture": {
+        "declaredAt": "2026-11-11T12:15:18.077823+00:00",
+        "observedAt": "2026-11-11T12:15:18.836099+00:00",
+        "source": "isolated API execution, scripted model and injected map outage",
+        "release": null,
+        "runAlias": "live-e51c1819be",
+        "eventCount": 34,
+        "events": [
+          {
+            "seq": 1,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "understand",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 2,
+            "phase": "understanding",
+            "status": "ok",
+            "detail": {
+              "attempt": 1
+            }
+          },
+          {
+            "seq": 3,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "search_places",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 4,
+            "phase": "place_search",
+            "status": "ok",
+            "detail": {
+              "count": 1,
+              "query": "曲院风荷"
+            }
+          },
+          {
+            "seq": 5,
+            "phase": "mcp_call",
+            "status": "ok",
+            "detail": {
+              "tool": "search_places",
+              "ok": true,
+              "durationMs": 2,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 6,
+            "phase": "place_search",
+            "status": "ok",
+            "detail": {
+              "count": 2,
+              "query": "浙江省博物馆孤山馆区"
+            }
+          },
+          {
+            "seq": 7,
+            "phase": "mcp_call",
+            "status": "ok",
+            "detail": {
+              "tool": "search_places",
+              "ok": true,
+              "durationMs": 2,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 8,
+            "phase": "place_search",
+            "status": "ok",
+            "detail": {
+              "count": 3,
+              "query": "杭州东站"
+            }
+          },
+          {
+            "seq": 9,
+            "phase": "mcp_call",
+            "status": "ok",
+            "detail": {
+              "tool": "search_places",
+              "ok": true,
+              "durationMs": 2,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 10,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "review_requirements",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 11,
+            "phase": "clarification",
+            "status": "ok",
+            "detail": {
+              "missing": [
+                "mode",
+                "place:15b6b1c55dbcaf4b",
+                "place:d97a59aa652b2ee6",
+                "place:366608ddb0b415d0",
+                "return"
+              ],
+              "ready": false
+            }
+          },
+          {
+            "seq": 12,
+            "phase": "needs_input",
+            "status": "ok",
+            "detail": {
+              "steps": 12
+            }
+          },
+          {
+            "seq": 13,
+            "phase": "graph_pause",
+            "status": "ok",
+            "detail": {
+              "status": "needs_input",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 14,
+            "phase": "resumed",
+            "status": "ok",
+            "detail": {}
+          },
+          {
+            "seq": 15,
+            "phase": "graph_resume",
+            "status": "ok",
+            "detail": {
+              "engine": "langgraph",
+              "version": 2
+            }
+          },
+          {
+            "seq": 16,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "understand",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 17,
+            "phase": "understanding",
+            "status": "ok",
+            "detail": {
+              "attempt": 1
+            }
+          },
+          {
+            "seq": 18,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "search_places",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 19,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "review_requirements",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 20,
+            "phase": "clarification",
+            "status": "ok",
+            "detail": {
+              "missing": [],
+              "ready": true
+            }
+          },
+          {
+            "seq": 21,
+            "phase": "needs_confirmation",
+            "status": "ok",
+            "detail": {
+              "steps": 21
+            }
+          },
+          {
+            "seq": 22,
+            "phase": "graph_pause",
+            "status": "ok",
+            "detail": {
+              "status": "review",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 23,
+            "phase": "resumed",
+            "status": "ok",
+            "detail": {}
+          },
+          {
+            "seq": 24,
+            "phase": "graph_resume",
+            "status": "ok",
+            "detail": {
+              "engine": "langgraph",
+              "version": 3
+            }
+          },
+          {
+            "seq": 25,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "choose_action",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 26,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "execute_tool",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 27,
+            "phase": "model",
+            "status": "ok",
+            "detail": {
+              "step": 1,
+              "action": "validate_plan"
+            }
+          },
+          {
+            "seq": 28,
+            "phase": "tool_call",
+            "status": "ok",
+            "detail": {
+              "step": 1,
+              "tool": "validate_plan",
+              "args": {
+                "days": [
+                  [
+                    "quyuan",
+                    "museum"
+                  ]
+                ],
+                "summary": "核验草案"
+              }
+            }
+          },
+          {
+            "seq": 29,
+            "phase": "mcp_call",
+            "status": "error",
+            "detail": {
+              "tool": "validate_plan",
+              "ok": false,
+              "durationMs": 2,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 30,
+            "phase": "tool_result",
+            "status": "error",
+            "detail": {
+              "step": 1,
+              "ok": false,
+              "error": "夹具：地图服务暂不可用"
+            }
+          },
+          {
+            "seq": 31,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "choose_action",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 32,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "execute_tool",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 33,
+            "phase": "model",
+            "status": "ok",
+            "detail": {
+              "step": 2,
+              "action": "give_up"
+            }
+          },
+          {
+            "seq": 34,
+            "phase": "gave_up",
+            "status": "ok",
+            "detail": {
+              "steps": 34
+            }
+          }
+        ],
+        "result": {
+          "status": "gave_up",
+          "written": false,
+          "plan": null,
+          "confirmation": null
+        },
+        "evidence": {
+          "injectedHttpStatus": 503,
+          "routeFixtureCalls": 1
+        },
+        "specSha256": "45818ee55e483c221ddb1cd93ec73dd81dee2af490063f335497818b0200977b"
+      },
+      "captureHint": null
     },
     {
       "id": "R05",
       "category": "reconnect_recovery",
       "title": "断线恢复",
-      "declaredAt": "2026-11-07T00:00:00+00:00",
+      "declaredAt": "2026-11-11T12:12:07.120950+00:00",
       "expectationSource": "pre-run request inputs (never derived from the observed result)",
       "spec": {
         "title": "断线恢复",
@@ -661,20 +1489,202 @@
         ],
         "allowedPlaceIds": [
           "quyuan",
-          "station"
+          "museum",
+          "amap:B023B0253E"
         ],
-        "allowedPlaceIdsSource": "place mentions / confirmed candidates in the pre-run request",
+        "allowedPlaceIdsSource": "explicit QA candidates fixed before execution",
         "requiredPlaceIds": [],
         "expectProposal": false,
         "requireValidationBeforeProposal": false,
         "maxSteps": 6,
         "maxToolCalls": 6,
-        "written": false
+        "written": false,
+        "requireSseReplay": true
       },
-      "expectationSha256": "99be5f1cf20a7dd18e019b56456d06a44282f92c258def6bc6cbee2c3218bf53",
-      "coverage": "not_captured",
-      "capture": null,
-      "captureHint": "scripts/capture_live_run.py --mode full plus an explicit pre-run spec"
+      "expectationSha256": "dbbcc817fcf1b5ba8206c104a65703b8add6a2601b2ff321fcbd83c6132c1bbd",
+      "coverage": "captured",
+      "capture": {
+        "declaredAt": "2026-11-11T12:12:07.120950+00:00",
+        "observedAt": "2026-11-11T12:12:13.894607+00:00",
+        "source": "live API payload, desensitized",
+        "release": "429ba5da2e50",
+        "runAlias": "live-0890361f8b",
+        "eventCount": 15,
+        "events": [
+          {
+            "seq": 1,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "understand",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 2,
+            "phase": "understanding",
+            "status": "ok",
+            "detail": {
+              "attempt": 1
+            }
+          },
+          {
+            "seq": 3,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "search_places",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 4,
+            "phase": "place_search",
+            "status": "ok",
+            "detail": {
+              "count": 1,
+              "query": "曲院风荷"
+            }
+          },
+          {
+            "seq": 5,
+            "phase": "mcp_call",
+            "status": "ok",
+            "detail": {
+              "tool": "search_places",
+              "ok": true,
+              "durationMs": 7,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 6,
+            "phase": "search_refine",
+            "status": "ok",
+            "detail": {
+              "round": 1,
+              "mentions": 1
+            }
+          },
+          {
+            "seq": 7,
+            "phase": "place_search",
+            "status": "ok",
+            "detail": {
+              "count": 2,
+              "query": "曲院风荷 主入口",
+              "refine": true
+            }
+          },
+          {
+            "seq": 8,
+            "phase": "mcp_call",
+            "status": "ok",
+            "detail": {
+              "tool": "search_places",
+              "ok": true,
+              "durationMs": 6,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 9,
+            "phase": "search_refine",
+            "status": "ok",
+            "detail": {
+              "round": 2,
+              "mentions": 1
+            }
+          },
+          {
+            "seq": 10,
+            "phase": "place_search",
+            "status": "ok",
+            "detail": {
+              "count": 3,
+              "query": "曲院风荷 停车点",
+              "refine": true
+            }
+          },
+          {
+            "seq": 11,
+            "phase": "mcp_call",
+            "status": "ok",
+            "detail": {
+              "tool": "search_places",
+              "ok": true,
+              "durationMs": 8,
+              "transport": "streamable-http"
+            }
+          },
+          {
+            "seq": 12,
+            "phase": "graph_node",
+            "status": "ok",
+            "detail": {
+              "node": "review_requirements",
+              "engine": "langgraph"
+            }
+          },
+          {
+            "seq": 13,
+            "phase": "clarification",
+            "status": "ok",
+            "detail": {
+              "missing": [
+                "people",
+                "mode",
+                "place:15b6b1c55dbcaf4b"
+              ],
+              "ready": false
+            }
+          },
+          {
+            "seq": 14,
+            "phase": "needs_input",
+            "status": "ok",
+            "detail": {
+              "steps": 14
+            }
+          },
+          {
+            "seq": 15,
+            "phase": "graph_pause",
+            "status": "ok",
+            "detail": {
+              "status": "needs_input",
+              "engine": "langgraph"
+            }
+          }
+        ],
+        "result": {
+          "status": "needs_input",
+          "written": false,
+          "plan": null,
+          "confirmation": null
+        },
+        "evidence": {
+          "cursor": 1,
+          "replayedIds": [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ]
+        },
+        "specSha256": "dbbcc817fcf1b5ba8206c104a65703b8add6a2601b2ff321fcbd83c6132c1bbd"
+      },
+      "captureHint": null
     }
   ]
 }

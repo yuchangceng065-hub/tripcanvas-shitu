@@ -33,7 +33,7 @@ def wait_for_run(client, run_id):
     raise TimeoutError('Agent fixture did not reach a stable state')
 
 
-def run_case(case_id):
+def run_case(case_id, *, include_observation=False):
     case = CASES[case_id]
     model_calls = 0
     road_calls = 0
@@ -153,7 +153,8 @@ def run_case(case_id):
                 errors.append('validation_not_mcp')
             if case_id != 'restart_and_repair' and not any(event['status'] == 'error' for event in mcp_events):
                 errors.append('missing_tool_failure')
-            if response_json(client.get('/api/v1/trips')):
+            written = bool(response_json(client.get('/api/v1/trips')))
+            if written:
                 errors.append('unconfirmed_write')
 
             if run['status'] == 'completed':
@@ -191,6 +192,9 @@ def run_case(case_id):
         }}
         for event in events if event['phase'] in ('graph_node', 'graph_pause', 'graph_resume', 'model', 'mcp_call')
     ]
-    return {'case': case_id, 'status': run['status'], 'errors': sorted(set(errors)),
-            'modelFixtureCalls': model_calls, 'roadFixtureCalls': road_calls,
-            'elapsedMs': round((time.monotonic() - started) * 1000), 'trace': trace}
+    report = {'case': case_id, 'status': run['status'], 'errors': sorted(set(errors)),
+              'modelFixtureCalls': model_calls, 'roadFixtureCalls': road_calls,
+              'elapsedMs': round((time.monotonic() - started) * 1000), 'trace': trace}
+    if include_observation:
+        report['observation'] = {'runId': run_id, 'payload': run, 'written': written}
+    return report

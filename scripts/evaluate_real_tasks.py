@@ -96,6 +96,11 @@ def _case(task: dict) -> dict:
     case['title'] = task['title']
     case['result']['written'] = bool(result.get('written'))
     case['result']['confirmation'] = result.get('confirmation')
+    case['result']['evidence'] = capture.get('evidence', {})
+    for key in ('written', 'requireResume', 'requireSseReplay', 'requiredIssueCode',
+                'expectedMcpFailures'):
+        if key in task['spec']:
+            case['expect'][key] = task['spec'][key]
     return case
 
 
@@ -176,6 +181,7 @@ def main():
             'failedChecks': row['failedChecks'] if row else [],
             'outcomeReasons': row.get('outcomeReasons', []) if row else [],
             'eventCount': task['capture']['eventCount'] if task.get('capture') else 0,
+            'source': task['capture']['source'] if task.get('capture') else None,
         })
     report = {
         'kind': 'real-task-evaluation/v1',
@@ -200,7 +206,7 @@ def main():
         'processPassRate': verdicts.get('processPassRate', 0),
         'outcomePassRate': verdicts.get('outcomePassRate', 0),
         'tasks': tasks,
-        'note': ('Observed real runs. Process and outcome are judged separately; this is a '
+        'note': ('Observed runs with per-task provenance. Process and outcome are judged separately; this is a '
                  'behaviour measurement, not evaluator label agreement or an AI accuracy rate.'),
     }
     if args.baseline:

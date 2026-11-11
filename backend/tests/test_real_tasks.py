@@ -78,7 +78,7 @@ def test_evaluation_keeps_four_families_and_process_outcome_separate():
         'syntheticAgentSamples', 'desensitizedRealTasks'}
     assert 'doNotMerge' in report and report['expectationIntegrity'] == 'passed'
     assert report['coverage']['declared'] == 5
-    assert report['coverage']['captured'] == 2
+    assert report['coverage']['captured'] == 5
     assert set(report['quadrants']) == {'both_pass', 'result_only', 'process_only', 'both_fail'}
     for row in report['tasks']:
         if row['coverage'] == 'captured':
@@ -86,6 +86,11 @@ def test_evaluation_keeps_four_families_and_process_outcome_separate():
             assert row['verdict'] in report['quadrants']
         else:
             assert row['verdict'] is None
+    by_category = {row['category']: row for row in report['tasks']}
+    assert by_category['clarification_resume']['verdict'] == 'both_pass'
+    assert by_category['reconnect_recovery']['verdict'] == 'both_pass'
+    assert by_category['infeasible_constraint']['verdict'] == 'result_only'
+    assert 'injected map outage' in by_category['tool_failure']['source']
 
 
 def test_tampering_with_pre_run_expectations_is_rejected():

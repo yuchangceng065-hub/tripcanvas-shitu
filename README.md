@@ -5,19 +5,21 @@
 
 面向杭州 1—3 日短途游的个人行程规划网页，使用 Vue 3 + TypeScript 和 FastAPI。支持真实地点搜索、步行 / 自驾接驳路线及地图时间轴编辑。首次打开是杭州西湖的可编辑示例行程。
 
+[打开公开演示](https://yuchangceng065-hub.github.io/tripcanvas-demo/) · [54 秒操作录屏](https://github.com/yuchangceng065-hub/tripcanvas-shitu/releases/download/interview-demo-2026-11-11/tripcanvas-demo.webm) · [浏览器验收](docs/browser-acceptance.md) · [五类 Agent 任务评测](docs/evaluation.md#脱敏真实任务与版本对比)
+
+首次连接可能要等 Render 唤醒。进入「我的旅行 → 开启新旅行」，注册后可用 AI 对话规划并保存云端行程。
+
 当前执行范围、里程碑与验收标准见 [杭州版本执行计划](docs/hangzhou-plan.md)；已完成与未完成能力见 [能力清单](docs/capability-matrix.md)。现阶段已支持候选地点草案、单地点意图加入和局部路线调整；规则需求确认与模型分日排序已接通，多方案可在新建旅行中比较。
 
 
-## 当前状态（2026-11-07）
+## 当前状态（2026-11-11）
 
-> 线上前端仍是上一版且 owner-private（403）；下面「已验收」指源码与线上 API，不代表 Sites 静态站点已更新。
-
-- 线上前端：https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site/ ，Sites 静态托管，仅所有者可访问。
+- 线上前端使用 GitHub Pages。原 Sites 预览保留所有者访问范围。
 - 线上 API：https://tripcanvas-api.onrender.com/api/v1 ，Render Free 单实例；数据库为 Neon Free PostgreSQL。健康检查返回 `plannerMode=model`、`model=true`、`map=amap`、`routing=amap`、`storage=postgresql`。
 - 线上已验收：注册登录、Bearer 会话、行程同步、版本记录、快照分享与撤销、高德地图与路线、地点搜索、停车接驳。
 - 规划模式：线上已启用 Groq Free Tier 的 `openai/gpt-oss-20b`，支持真实模型分日排序与局部修改；规则草案仍可单独选择。
-- 自动化：前端 124 项（含实际 Vue 组件交互）、后端 269 项测试通过（0 xfail），生产构建通过；GitHub Actions 运行测试、构建、离线评测与空库迁移；Postgres 17 兼容性工作流已跑通（迁移 + 完整后端测试）。最新记录见 `docs/verification.md`。
-- 轨迹级评测：固定集 14 条 `agreement=14/14`；线上 observed 已覆盖「澄清反问」与「规划→确认→保存」两个真实样本，均 `both_pass`。`/planner/confirm` 可选 `runId` 会写出权威 `confirmed` 事件（需部署新后端才在线上生效）。详见 `docs/trajectory-evaluation.md`。
+- 自动化覆盖前端组件、后端、生产构建、离线评测和空库迁移。PostgreSQL 17 工作流对真库运行完整后端测试。
+- Agent 任务覆盖 5/5，四条为线上执行，一条为隔离环境的地图故障注入。四条过程和结果均达标；不可行任务安全地保留了数据状态，但终止方式和工具失败轨迹与预设不同。固定合成轨迹的评测器标签一致性为 14/14。[评测口径](docs/evaluation.md)
 - 运行期护栏：除步数预算（`MAX_STEPS`/`MAX_TOTAL_STEPS`）外，新增**上下文字符预算**（`PLAN_CONTEXT_CHARS_BUDGET`，默认 28000）与**运行期 TTL**（`PLAN_RUN_TTL_SECONDS`，默认 1800）。任一超额即在调用模型前安全终止为 `incomplete` 并标注 `guard=context|ttl|steps`；弃用运行（超过 TTL）在 `/reply` 恢复时被 `restart()` 直接拒绝，返回清晰提示。`backend/limits.py` 为纯配置模块，`backend/tests/test_budget_guard.py` 覆盖上下文/TTL 护栏与过期运行恢复拒绝，步数护栏由 `backend/tests/test_agent.py` 覆盖。
 
 ## 架构

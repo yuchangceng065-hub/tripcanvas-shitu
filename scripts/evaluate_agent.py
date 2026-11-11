@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--baseline', type=Path, help='Compare with a prior synthetic evaluation report')
+    parser.add_argument('--capture-tool-failure', type=Path,
+                        help='Record the isolated tool-failure execution for the real-task suite')
     parser.add_argument('--upload', action='store_true', help='Upload synthetic examples and results to LangSmith')
     args = parser.parse_args()
     if args.upload and not os.getenv('LANGSMITH_API_KEY'):
@@ -31,6 +34,29 @@ def main():
             os.environ.pop(key, None)
             os.environ[key] = ''
         from scripts.agent_cases import CASES, run_case
+
+        if args.capture_tool_failure:
+            from scripts.build_real_task_suite import declared_spec
+
+            spec = declared_spec('tool_failure')
+            declared = datetime.now(timezone.utc).isoformat()
+            failure = run_case('upstream_unavailable', include_observation=True)
+            if failure['errors']:
+                raise RuntimeError(failure['errors'])
+            capture = {
+                'captureVersion': 'live-run/v1',
+                'source': 'isolated API execution, scripted model and injected map outage',
+                'declaredAt': declared,
+                'capturedAt': datetime.now(timezone.utc).isoformat(),
+                'runs': [{**failure['observation'], 'spec': spec,
+                          'evidence': {'injectedHttpStatus': 503,
+                                       'routeFixtureCalls': failure['roadFixtureCalls']}}],
+            }
+            args.capture_tool_failure.parent.mkdir(parents=True, exist_ok=True)
+            args.capture_tool_failure.write_text(
+                json.dumps(capture, ensure_ascii=False, indent=2) + '\n', encoding='utf-8',
+            )
+            return 0
 
         rows = [{'inputs': {'case_id': name}, 'outputs': {'terminal': case['terminal']}}
                 for name, case in CASES.items()]

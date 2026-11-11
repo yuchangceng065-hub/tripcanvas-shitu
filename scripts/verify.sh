@@ -42,7 +42,7 @@ if [ "${1:-}" = "--quick" ]; then
   DATABASE_URL="sqlite:////tmp/tc-migration-${STAMP}.db" "$PY" -m alembic upgrade head
   step "Whitespace check"
   git diff --check
-  printf '\nBackend baseline: ALL GREEN (--quick)\n'
+  printf '\nBackend baseline checks finished (--quick)\n'
   exit 0
 fi
 
@@ -71,6 +71,5 @@ DATABASE_URL="sqlite:////tmp/tc-migration-${STAMP}.db" "$PY" -m alembic upgrade 
 step "Whitespace check"
 git diff --check
 
-printf '\nFull baseline: ALL GREEN\n'
-printf 'Note: real task suite still has 3 not_captured categories (infeasible / tool failure / reconnect).\n'
-printf '      That is a coverage gap, NOT a failure. See docs/evaluation.md.\n'
+printf '\nFull baseline checks finished\n'
+printf 'Observed task coverage and per-task verdicts are listed above.\n'
