@@ -221,6 +221,17 @@ def test_anonymous_daily_budget_is_bounded(client):
     assert caught.value.status_code==429
     assert '未登录' in caught.value.detail
 
+def test_public_pages_origin_is_scoped_to_the_existing_render_service():
+    from backend.app import frontend_origins
+
+    pages = 'https://yuchangceng065-hub.github.io'
+    sites = 'https://tripcanvas-shitu-melody.yuchangceng065.chatgpt.site'
+    assert frontend_origins(sites, 'tripcanvas-api.onrender.com') == [sites, pages]
+    assert frontend_origins(f'{sites}, {pages}/', 'tripcanvas-api.onrender.com') == [sites, pages]
+    assert frontend_origins(sites, 'another-api.onrender.com') == [sites]
+    assert frontend_origins(sites, '') == [sites]
+
+
 def test_same_host_origin_passes_behind_tls_proxy(client):
     response=client.post('/api/v1/routes',json={'mode':'walk','placeIds':['invented','quyuan']},
         headers={'Origin':'https://tripcanvas-api.onrender.com','Host':'tripcanvas-api.onrender.com'})

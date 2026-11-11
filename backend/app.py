@@ -74,8 +74,21 @@ async def lifespan(app):
                     await asyncio.gather(*tasks, return_exceptions=True)
     engine.dispose()
 app=FastAPI(title='拾途 TripCanvas API',version='1.0.0',lifespan=lifespan)
-ORIGINS=os.getenv('FRONTEND_ORIGINS','http://127.0.0.1:5173,http://localhost:5173').split(',')
-ORIGINS=[origin.strip().rstrip('/') for origin in ORIGINS if origin.strip()]
+
+
+def frontend_origins(configured: str, render_hostname: str) -> list[str]:
+    origins = [origin.strip().rstrip('/') for origin in configured.split(',') if origin.strip()]
+    public_demo = 'https://yuchangceng065-hub.github.io'
+    # The existing Render service predates the checked-in Blueprint.
+    if render_hostname == 'tripcanvas-api.onrender.com' and public_demo not in origins:
+        origins.append(public_demo)
+    return origins
+
+
+ORIGINS = frontend_origins(
+    os.getenv('FRONTEND_ORIGINS', 'http://127.0.0.1:5173,http://localhost:5173'),
+    os.getenv('RENDER_EXTERNAL_HOSTNAME', ''),
+)
 COMMIT=(os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_COMMIT') or '').strip()
 if not logging.getLogger().handlers:logging.basicConfig(level=os.getenv('LOG_LEVEL','INFO'),format='%(asctime)s %(levelname)s %(name)s %(message)s')
 # Upstream URLs can contain map credentials; keep request IDs, not URL dumps.
