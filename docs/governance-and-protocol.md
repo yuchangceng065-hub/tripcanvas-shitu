@@ -20,7 +20,7 @@
 | `backend/routers/planner.py` | `/runs/{id}/events?format=ag-ui` 可选视图；**默认 `sse` 行为完全不变** |
 | `backend/tests/test_incident_cases.py` | 事故型 / 治理契约回归：并发预算、坏历史、游标、端点协商、嵌套密钥、成本未知、`usageReport` 接入、**封存终态 fencing、原子 seq、确认事件**；已无 `xfail` |
 
-验证结果（当前）：后端全量 `pytest` **269 passed, 0 xfailed**、前端 `vitest` **123 passed**，`ruff check backend scripts` 与生产构建全过；`alembic upgrade head` 空库迁移链通过。用 `--basetemp` 指定独立临时目录，避开本机沙箱 shim 与 pytest 默认临时目录的 `EEXIST` 冲突（与代码无关，CI 不存在该问题）。
+该轮评审验收通过后端 269 项与前端 123 项测试、Ruff、生产构建和 Alembic 空库迁移。最新发布的测试数量见 [README 的校验章节](../README.md#校验)。
 
 计费口径定义：
 

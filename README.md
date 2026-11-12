@@ -5,7 +5,7 @@
 
 面向杭州 1—3 日短途游的个人行程规划网页，使用 Vue 3 + TypeScript 和 FastAPI。支持真实地点搜索、步行 / 自驾接驳路线及地图时间轴编辑。首次打开是杭州西湖的可编辑示例行程。
 
-[打开公开演示](https://yuchangceng065-hub.github.io/tripcanvas-demo/) · [54 秒操作录屏](https://github.com/yuchangceng065-hub/tripcanvas-shitu/releases/download/interview-demo-2026-11-11/tripcanvas-demo.webm) · [浏览器验收](docs/browser-acceptance.md) · [五类 Agent 任务评测](docs/evaluation.md#脱敏真实任务与版本对比)
+[打开公开演示](https://yuchangceng065-hub.github.io/tripcanvas-demo/) · [54 秒操作录屏](https://github.com/yuchangceng065-hub/tripcanvas-shitu/releases/download/demo-2026-11-11/tripcanvas-demo.webm) · [浏览器验收](docs/browser-acceptance.md) · [五类 Agent 任务评测](docs/evaluation.md#脱敏真实任务与版本对比)
 
 首次连接可能要等 Render 唤醒。进入「我的旅行 → 开启新旅行」，注册后可用 AI 对话规划并保存云端行程。
 
@@ -25,7 +25,7 @@
 
 ## 架构
 
-[一页面试版架构与技术追问](docs/interview-one-page.md)
+[系统架构与关键实现](docs/architecture-notes.md)
 
 ```mermaid
 flowchart LR
@@ -166,7 +166,7 @@ npm run build
 
 一行跑完全套基线：`bash scripts/verify.sh`（`--quick` 只跑后端与评测）。脚本统一传 `--basetemp` 绕开本机沙箱 `tmp_path` 冲突，并按四类评测分别输出，见 `docs/evaluation.md`。
 
-当前结果：前端 124 项、后端 269 项通过，`vue-tsc` 类型检查与 Vite 生产构建通过；CI 此外运行 `ruff check`（pyflakes 规则）、30 条离线评测与 Alembic 空库迁移。四类评测分别报告，见 `docs/evaluation.md`；脱敏真实任务集另由 `scripts/evaluate_real_tasks.py` 输出覆盖率与版本对比。
+发布验收通过前端 **127 项**、后端 **273 项**测试，以及 `vue-tsc` 类型检查与 Vite 构建。CI 同时运行 Ruff、30 条离线评测和 Alembic 空库迁移。各套评测的样本来源与统计口径见 [评测文档](docs/evaluation.md)。
 
 浏览器验收（需本地 API + Vite + Chrome 调试端口）：`node scripts/browser-check.mjs`，脚本会跑完“一句需求 → 地点确认 → 草案 → 确认保存”，并拒绝在非本地 API 上创建测试账号。测试覆盖锁定保护、仅修改指定日期、时间冲突与顺延协调、中文输入法 Enter、地点意图、道路结构校验、分享快照、撤销、用户隔离、版本幂等、高德响应与预算。
 

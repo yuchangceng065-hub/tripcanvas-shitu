@@ -43,7 +43,7 @@
 | CI（测试/构建/评测/迁移） | 已验证 | GitHub Actions：pytest、vitest、build、30 条离线评测、空库 Alembic |
 | 数据库迁移（Alembic） | 已验证（基线） | 基线迁移与模型一致；线上既有库首次接入需 `stamp head` |
 | 可观测性 | 部分 | health 返回 commit、X-Request-ID 与请求日志、基础安全头；无指标/追踪系统 |
-| PostgreSQL 兼容性 | 已验证 | CI 在 Postgres 17 上执行迁移与全套后端测试（历史 run 41902369499，当时 123 项）；当前为 269 项 |
+| PostgreSQL 兼容性 | 已验证 | CI 在 PostgreSQL 17 上执行迁移与 273 项后端测试，热点并发数据见 [并发实测](postgres-contention.md) |
 | 高德预算、限速、有界缓存 | 已验证 | `provider_usage` 原子扣减；达到预算 429，不自动升级 |
 | 数据库迁移体系（Alembic） | 已验证 | 基线和增量迁移，空库 SQLite/PostgreSQL CI |
 | 固定任务评测集（30 条） | 已验证（工程） | 10开发+20非盲回归，30/30；零模型/外部请求，真实模型另测；见 evaluation.md |

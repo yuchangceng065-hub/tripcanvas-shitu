@@ -2,7 +2,7 @@
 
 2026-11-11 · Chromium 独立浏览器会话 · GitHub Pages / Render
 
-[公开演示](https://yuchangceng065-hub.github.io/tripcanvas-demo/) · [54 秒操作录屏](https://github.com/yuchangceng065-hub/tripcanvas-shitu/releases/download/interview-demo-2026-11-11/tripcanvas-demo.webm)
+[公开演示](https://yuchangceng065-hub.github.io/tripcanvas-demo/) · [54 秒操作录屏](https://github.com/yuchangceng065-hub/tripcanvas-shitu/releases/download/demo-2026-11-11/tripcanvas-demo.webm)
 
 录屏展示云端连接、测试注册、Agent 反问、补充需求、确认保存和重新登录。录制使用临时账号和测试行程。
 
