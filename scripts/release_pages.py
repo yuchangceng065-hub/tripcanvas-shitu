@@ -11,9 +11,7 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
-from urllib.error import URLError
 from urllib.parse import quote, urlsplit
-from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = 'https://yuchangceng065-hub.github.io/tripcanvas-demo/'
@@ -80,13 +78,30 @@ def build(commit, output, api):
     print(f'Built {commit} into {output} ({len(files)} verified files)')
 
 
-def read(url):
-    with urlopen(Request(url, headers={'Cache-Control': 'no-cache'}), timeout=25) as response:
-        return response.read()
+def fetch(url, *, origin=None):
+    # Use the system TLS store and retry transient CDN and proxy failures.
+    with tempfile.TemporaryDirectory(prefix='tripcanvas-release-check-') as temporary:
+        response = Path(temporary) / 'response'
+        command = [
+            'curl', '--disable', '--fail', '--silent', '--show-error', '--proto', '=https',
+            '--connect-timeout', '10', '--max-time', '25', '--retry', '2',
+            '--retry-all-errors', '--retry-max-time', '30',
+            '--header', 'Cache-Control: no-cache',
+        ]
+        if origin:
+            command.extend([
+                '--request', 'OPTIONS', '--dump-header', str(response), '--output', os.devnull,
+                '--header', f'Origin: {origin}', '--header', 'Access-Control-Request-Method: POST',
+                '--header', 'Access-Control-Request-Headers: authorization,content-type,last-event-id',
+            ])
+        else:
+            command.extend(['--output', str(response)])
+        subprocess.run([*command, url], check=True)
+        return response.read_bytes()
 
 
 def verify(commit, site, api):
-    manifest = json.loads(read(site + 'release.json'))
+    manifest = json.loads(fetch(site + 'release.json'))
     if manifest.get('sourceCommit') != commit or manifest.get('apiBase') != api:
         raise ValueError('Published Pages manifest does not match the expected source commit and API')
     if manifest.get('basePath') != urlsplit(site).path:
@@ -102,23 +117,22 @@ def verify(commit, site, api):
         if relative.is_absolute() or '..' in relative.parts:
             raise ValueError(f'Invalid asset path: {path}')
         asset = site if path == 'index.html' else site + quote(path)
-        if sha256(read(asset)) != digest:
+        if sha256(fetch(asset)) != digest:
             raise ValueError(f'Published asset differs from the manifest: {path}')
 
-    health = json.loads(read(api + '/health'))
+    health = json.loads(fetch(api + '/health'))
     deployed = health.get('commit') or ''
     if not re.fullmatch(r'[0-9a-f]{7,40}', deployed) or not commit.startswith(deployed):
         raise ValueError(f'Render reports commit {deployed or "unknown"}; expected {commit}')
     if health.get('status') != 'ok' or health.get('storage') != 'postgresql':
         raise ValueError('Render health does not report a healthy PostgreSQL-backed API')
     origin = f'{urlsplit(site).scheme}://{urlsplit(site).netloc}'
-    preflight = Request(api + '/planner/confirm', method='OPTIONS', headers={
-        'Origin': origin, 'Access-Control-Request-Method': 'POST',
-        'Access-Control-Request-Headers': 'authorization,content-type,last-event-id',
-    })
-    with urlopen(preflight, timeout=25) as response:
-        if response.headers.get('Access-Control-Allow-Origin') != origin:
-            raise ValueError(f'API does not allow {origin}')
+    headers = fetch(api + '/planner/confirm', origin=origin).decode()
+    if not any(
+        name.lower() == 'access-control-allow-origin' and value.strip() == origin
+        for name, _, value in (line.partition(':') for line in headers.splitlines())
+    ):
+        raise ValueError(f'API does not allow {origin}')
     print(f'Pages assets ({len(files)}) and Render commit verified: {commit}')
 
 
@@ -140,7 +154,7 @@ def main():
             build(commit, args.output, api)
         else:
             verify(commit, args.site.rstrip('/') + '/', api)
-    except (ValueError, URLError) as error:
+    except ValueError as error:
         parser.exit(1, f'{error}\n')
     except subprocess.CalledProcessError as error:
         parser.exit(error.returncode, f'{error.cmd[0]} exited with status {error.returncode}\n')

@@ -58,7 +58,7 @@ git -C ../tripcanvas-demo-release push origin main
 python3 scripts/release_pages.py verify --commit "$release_commit"
 ```
 
-脚本通过公开 URL 下载资源，校验首页和静态文件哈希、后端提交、PostgreSQL 健康状态以及 Pages 跨域预检。CDN 更新后，用独立浏览器会话再跑注册、规划、确认保存和刷新后的行程列表。用测试账号验证完整 Agent 保存链路时，运行以下命令。
+脚本用 curl 7.71+ 从公开 URL 下载资源并重试临时网络错误，校验首页和静态文件哈希、后端提交、PostgreSQL 健康状态以及 Pages 跨域预检。CDN 更新后，用独立浏览器会话再跑注册、规划、确认保存和刷新后的行程列表。以下完整链路采集会保留独立 QA 账号的运行记录和一条测试行程。
 
 ```sh
 .venv/bin/python scripts/capture_live_run.py --mode full \
